@@ -1,8 +1,19 @@
+import { useState } from 'react'
 import './App.css'
 
-function App() {
+type Tab = 'home' | 'picks' | 'standings' | 'history' | 'settings'
+
+const tabs: { id: Tab; label: string; icon: string }[] = [
+  { id: 'home', label: 'Home', icon: '⌂' },
+  { id: 'picks', label: 'Picks', icon: '🏈' },
+  { id: 'standings', label: 'Standings', icon: '▥' },
+  { id: 'history', label: 'History', icon: '↺' },
+  { id: 'settings', label: 'Settings', icon: '⚙' },
+]
+
+function HomePage() {
   return (
-    <main className="app">
+    <>
       <header className="app-header">
         <p className="eyebrow">2026 Season</p>
         <h1>College Pick&apos;em</h1>
@@ -24,17 +35,52 @@ function App() {
           Make Picks
         </button>
       </section>
+    </>
+  )
+}
 
-      <section className="quick-links">
-        <button type="button">Standings</button>
-        <button type="button">History</button>
-        <button type="button">Settings</button>
-      </section>
+function PlaceholderPage({ title }: { title: string }) {
+  return (
+    <section className="page-placeholder">
+      <p className="eyebrow">College Pick&apos;em</p>
+      <h1>{title}</h1>
+      <p>This section is coming next.</p>
+    </section>
+  )
+}
 
-      <footer>
-        <p>Admin setup in progress</p>
-      </footer>
-    </main>
+function App() {
+  const [activeTab, setActiveTab] = useState<Tab>('home')
+
+  const page = {
+    home: <HomePage />,
+    picks: <PlaceholderPage title="Picks" />,
+    standings: <PlaceholderPage title="Standings" />,
+    history: <PlaceholderPage title="History" />,
+    settings: <PlaceholderPage title="Settings" />,
+  }[activeTab]
+
+  return (
+    <div className="app-shell">
+      <main className="app-content">{page}</main>
+
+      <nav className="bottom-nav" aria-label="Primary navigation">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            className={activeTab === tab.id ? 'nav-item active' : 'nav-item'}
+            onClick={() => setActiveTab(tab.id)}
+            aria-current={activeTab === tab.id ? 'page' : undefined}
+          >
+            <span className="nav-icon" aria-hidden="true">
+              {tab.icon}
+            </span>
+            <span>{tab.label}</span>
+          </button>
+        ))}
+      </nav>
+    </div>
   )
 }
 

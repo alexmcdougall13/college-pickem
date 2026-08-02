@@ -10,11 +10,16 @@ button {
   font: inherit;
 }
 
-.app {
+.app-shell {
   width: min(100%, 480px);
   min-height: 100vh;
   margin: 0 auto;
-  padding: 32px 20px;
+  background: #f4f7fa;
+}
+
+.app-content {
+  min-height: 100vh;
+  padding: 32px 20px 108px;
 }
 
 .app-header {
@@ -84,25 +89,50 @@ h2 {
   cursor: not-allowed;
 }
 
-.quick-links {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
-  margin-top: 18px;
+.page-placeholder {
+  padding-top: 12px;
 }
 
-.quick-links button {
-  padding: 14px 8px;
-  border: 1px solid #dbe2ea;
-  border-radius: 12px;
-  background: white;
+.page-placeholder p:last-child {
+  margin-top: 16px;
+  color: #64748b;
+}
+
+.bottom-nav {
+  position: fixed;
+  left: 50%;
+  bottom: 0;
+  z-index: 10;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  width: min(100%, 480px);
+  padding: 10px 8px calc(10px + env(safe-area-inset-bottom));
+  border-top: 1px solid #dbe2ea;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 -8px 24px rgba(15, 23, 42, 0.08);
+  transform: translateX(-50%);
+  backdrop-filter: blur(12px);
+}
+
+.nav-item {
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 2px;
+  border: 0;
+  background: transparent;
+  color: #7b8798;
+  font-size: 0.7rem;
   font-weight: 600;
   cursor: pointer;
 }
 
-footer {
-  margin-top: 40px;
-  text-align: center;
-  color: #94a3b8;
-  font-size: 0.85rem;
+.nav-icon {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.nav-item.active {
+  color: #172033;
 }
