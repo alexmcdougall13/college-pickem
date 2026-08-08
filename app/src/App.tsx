@@ -7,7 +7,17 @@ import {
   signOut,
   type User,
 } from 'firebase/auth'
-import { auth } from './firebase/firebase'
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  serverTimestamp,
+  setDoc,
+  where,
+} from 'firebase/firestore'
+import { auth, db } from './firebase/firebase'
 import './App.css'
 
 type Tab = 'home' | 'picks' | 'standings' | 'history' | 'settings'
@@ -30,6 +40,8 @@ type Game = {
 }
 
 type Picks = Record<string, string>
+
+const WEEK_ID = '2026-week-1'
 
 const tabs: { id: Tab; label: string; icon: string }[] = [
   { id: 'home', label: 'Home', icon: '⌂' },
@@ -118,20 +130,23 @@ function TeamCard({
   designation,
   selected,
   onSelect,
+  disabled,
 }: {
   team: Team
   designation: 'Away' | 'Home'
   selected: boolean
   onSelect: () => void
+  disabled?: boolean
 }) {
   return (
     <button
       type="button"
       className={selected ? 'team-card selected' : 'team-card'}
       onClick={() => {
-        if (!selected) onSelect()
+        if (!selected && !disabled) onSelect()
       }}
       aria-pressed={selected}
+      disabled={disabled}
     >
       {selected && (
         <span className="selected-check" aria-hidden="true">
@@ -183,7 +198,13 @@ function GameHeader({ game }: { game: Game }) {
   )
 }
 
-function HomePage({ picksMade }: { picksMade: number }) {
+function HomePage({
+  picksMade,
+  totalGames,
+}: {
+  picksMade: number
+  totalGames: number
+}) {
   return (
     <>
       <header className="app-header">
@@ -198,10 +219,10 @@ function HomePage({ picksMade }: { picksMade: number }) {
 
         <div className="pick-status">
           <span>
-            {picksMade} of {games.length} picks made
+            {picksMade} of {totalGames} picks made
           </span>
           <strong>
-            {picksMade === games.length
+            {picksMade === totalGames
               ? 'All picks completed'
               : 'Picks are open'}
           </strong>
@@ -213,23 +234,22 @@ function HomePage({ picksMade }: { picksMade: number }) {
 
 function PicksPage({
   picks,
-  setPicks,
+  onPick,
   tiebreaker,
-  setTiebreaker,
+  onTiebreakerChange,
+  savingGameId,
+  savingTiebreaker,
+  saveError,
 }: {
   picks: Picks
-  setPicks: React.Dispatch<React.SetStateAction<Picks>>
+  onPick: (gameId: string, teamId: string) => Promise<void>
   tiebreaker: string
-  setTiebreaker: React.Dispatch<React.SetStateAction<string>>
+  onTiebreakerChange: (value: string) => void
+  savingGameId: string | null
+  savingTiebreaker: boolean
+  saveError: string
 }) {
   const picksMade = Object.keys(picks).length
-
-  function selectTeam(gameId: string, teamId: string) {
-    setPicks((current) => ({
-      ...current,
-      [gameId]: teamId,
-    }))
-  }
 
   return (
     <>
@@ -239,6 +259,8 @@ function PicksPage({
         <p className="subtitle">
           {picksMade} of {games.length} games selected
         </p>
+
+        {saveError && <p className="login-error">{saveError}</p>}
       </header>
 
       <div className="games-list">
@@ -251,16 +273,22 @@ function PicksPage({
                 team={game.awayTeam}
                 designation="Away"
                 selected={picks[game.id] === game.awayTeam.id}
-                onSelect={() => selectTeam(game.id, game.awayTeam.id)}
+                onSelect={() => onPick(game.id, game.awayTeam.id)}
+                disabled={savingGameId === game.id}
               />
 
               <TeamCard
                 team={game.homeTeam}
                 designation="Home"
                 selected={picks[game.id] === game.homeTeam.id}
-                onSelect={() => selectTeam(game.id, game.homeTeam.id)}
+                onSelect={() => onPick(game.id, game.homeTeam.id)}
+                disabled={savingGameId === game.id}
               />
             </div>
+
+            {savingGameId === game.id && (
+              <p className="save-status">Saving pick…</p>
+            )}
           </section>
         ))}
       </div>
@@ -292,9 +320,13 @@ function PicksPage({
             inputMode="numeric"
             placeholder="54"
             value={tiebreaker}
-            onChange={(event) => setTiebreaker(event.target.value)}
+            onChange={(event) => onTiebreakerChange(event.target.value)}
           />
         </label>
+
+        {savingTiebreaker && (
+          <p className="save-status">Saving tiebreaker…</p>
+        )}
       </section>
     </>
   )
@@ -486,9 +518,13 @@ function LoginPage() {
 function App() {
   const [user, setUser] = useState<User | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
+  const [picksLoading, setPicksLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>('home')
   const [picks, setPicks] = useState<Picks>({})
   const [tiebreaker, setTiebreaker] = useState('')
+  const [savingGameId, setSavingGameId] = useState<string | null>(null)
+  const [savingTiebreaker, setSavingTiebreaker] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
@@ -499,6 +535,139 @@ function App() {
     return unsubscribe
   }, [])
 
+  useEffect(() => {
+    if (!user) {
+      setPicks({})
+      setTiebreaker('')
+      return
+    }
+
+    async function loadUserData() {
+      setPicksLoading(true)
+      setSaveError('')
+
+      try {
+        const picksQuery = query(
+          collection(db, 'picks'),
+          where('userId', '==', user.uid),
+          where('weekId', '==', WEEK_ID),
+        )
+
+        const snapshot = await getDocs(picksQuery)
+        const loadedPicks: Picks = {}
+
+        snapshot.forEach((pickDocument) => {
+          const data = pickDocument.data()
+
+          if (data.gameId && data.teamId) {
+            loadedPicks[data.gameId] = data.teamId
+          }
+        })
+
+        setPicks(loadedPicks)
+
+        const tiebreakerId = `${user.uid}_${WEEK_ID}`
+        const tiebreakerSnapshot = await getDoc(
+          doc(db, 'tiebreakers', tiebreakerId),
+        )
+
+        if (tiebreakerSnapshot.exists()) {
+          const data = tiebreakerSnapshot.data()
+
+          if (typeof data.totalPoints === 'number') {
+            setTiebreaker(String(data.totalPoints))
+          }
+        }
+      } catch (error) {
+        console.error(error)
+        setSaveError('Unable to load your saved picks.')
+      } finally {
+        setPicksLoading(false)
+      }
+    }
+
+    loadUserData()
+  }, [user])
+
+  async function savePick(gameId: string, teamId: string) {
+    if (!user) return
+
+    const previousTeamId = picks[gameId]
+
+    setPicks((current) => ({
+      ...current,
+      [gameId]: teamId,
+    }))
+
+    setSavingGameId(gameId)
+    setSaveError('')
+
+    try {
+      const pickId = `${user.uid}_${WEEK_ID}_${gameId}`
+
+      await setDoc(doc(db, 'picks', pickId), {
+        userId: user.uid,
+        weekId: WEEK_ID,
+        gameId,
+        teamId,
+        updatedAt: serverTimestamp(),
+      })
+    } catch (error) {
+      console.error(error)
+
+      setPicks((current) => {
+        const next = { ...current }
+
+        if (previousTeamId) {
+          next[gameId] = previousTeamId
+        } else {
+          delete next[gameId]
+        }
+
+        return next
+      })
+
+      setSaveError('Your pick could not be saved. Please try again.')
+    } finally {
+      setSavingGameId(null)
+    }
+  }
+
+  async function saveTiebreaker(value: string) {
+    if (!user) return
+
+    setTiebreaker(value)
+    setSaveError('')
+
+    if (value === '') return
+
+    const points = Number(value)
+
+    if (!Number.isInteger(points) || points < 0) {
+      setSaveError('Tiebreaker must be a whole number.')
+      return
+    }
+
+    setSavingTiebreaker(true)
+
+    try {
+      const tiebreakerId = `${user.uid}_${WEEK_ID}`
+
+      await setDoc(doc(db, 'tiebreakers', tiebreakerId), {
+        userId: user.uid,
+        weekId: WEEK_ID,
+        gameId: tiebreakerGame.id,
+        totalPoints: points,
+        updatedAt: serverTimestamp(),
+      })
+    } catch (error) {
+      console.error(error)
+      setSaveError('Your tiebreaker could not be saved. Please try again.')
+    } finally {
+      setSavingTiebreaker(false)
+    }
+  }
+
   if (authLoading) {
     return <main className="loading-screen">College Pick&apos;em</main>
   }
@@ -507,14 +676,26 @@ function App() {
     return <LoginPage />
   }
 
+  if (picksLoading) {
+    return <main className="loading-screen">Loading your picks…</main>
+  }
+
   const page = {
-    home: <HomePage picksMade={Object.keys(picks).length} />,
+    home: (
+      <HomePage
+        picksMade={Object.keys(picks).length}
+        totalGames={games.length}
+      />
+    ),
     picks: (
       <PicksPage
         picks={picks}
-        setPicks={setPicks}
+        onPick={savePick}
         tiebreaker={tiebreaker}
-        setTiebreaker={setTiebreaker}
+        onTiebreakerChange={saveTiebreaker}
+        savingGameId={savingGameId}
+        savingTiebreaker={savingTiebreaker}
+        saveError={saveError}
       />
     ),
     standings: <PlaceholderPage title="Standings" />,

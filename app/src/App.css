@@ -398,3 +398,10 @@ button.team-card:active {
   font-weight: 800;
   cursor: pointer;
 }
+
+.save-status {
+  margin: 10px 0 0;
+  color: #64748b;
+  font-size: 0.8rem;
+  text-align: center;
+}
