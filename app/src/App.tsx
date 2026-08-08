@@ -1,7 +1,17 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signOut,
+  type User,
+} from 'firebase/auth'
+import { auth } from './firebase/firebase'
 import './App.css'
 
 type Tab = 'home' | 'picks' | 'standings' | 'history' | 'settings'
+type AuthMode = 'signin' | 'signup' | 'reset'
 
 type Team = {
   id: string
@@ -118,9 +128,17 @@ function TeamCard({
     <button
       type="button"
       className={selected ? 'team-card selected' : 'team-card'}
-      onClick={onSelect}
+      onClick={() => {
+        if (!selected) onSelect()
+      }}
       aria-pressed={selected}
     >
+      {selected && (
+        <span className="selected-check" aria-hidden="true">
+          ✓
+        </span>
+      )}
+
       <span className="team-designation">{designation}</span>
 
       <span className="team-name">
@@ -257,6 +275,7 @@ function PicksPage({
             team={tiebreakerGame.awayTeam}
             designation="Away"
           />
+
           <StaticTeamCard
             team={tiebreakerGame.homeTeam}
             designation="Home"
@@ -265,6 +284,7 @@ function PicksPage({
 
         <label className="tiebreaker-input">
           <span>Predicted combined total points</span>
+
           <input
             type="number"
             min="0"
@@ -290,10 +310,202 @@ function PlaceholderPage({ title }: { title: string }) {
   )
 }
 
+function SettingsPage({ user }: { user: User }) {
+  async function handleSignOut() {
+    await signOut(auth)
+  }
+
+  return (
+    <section className="page-placeholder">
+      <p className="eyebrow">College Pick&apos;em</p>
+      <h1>Settings</h1>
+      <p>Signed in as {user.email}</p>
+
+      <button
+        type="button"
+        className="settings-signout"
+        onClick={handleSignOut}
+      >
+        Sign Out
+      </button>
+    </section>
+  )
+}
+
+function LoginPage() {
+  const [mode, setMode] = useState<AuthMode>('signin')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  function resetMessages() {
+    setError('')
+    setMessage('')
+  }
+
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault()
+    resetMessages()
+    setLoading(true)
+
+    try {
+      if (mode === 'signin') {
+        await signInWithEmailAndPassword(auth, email, password)
+      }
+
+      if (mode === 'signup') {
+        if (password !== confirmPassword) {
+          setError('Passwords do not match.')
+          return
+        }
+
+        await createUserWithEmailAndPassword(auth, email, password)
+      }
+
+      if (mode === 'reset') {
+        await sendPasswordResetEmail(auth, email)
+        setMessage('Password reset email sent. Check your inbox.')
+      }
+    } catch {
+      setError(
+        mode === 'reset'
+          ? 'Unable to send reset email.'
+          : 'Unable to continue. Check your information and try again.',
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <main className="login-page">
+      <div className="login-card">
+        <p className="eyebrow">2026 Season</p>
+        <h1>College Pick&apos;em</h1>
+
+        <p className="subtitle">
+          {mode === 'signin' && 'Sign in to make your picks.'}
+          {mode === 'signup' && 'Create your College Pick’em account.'}
+          {mode === 'reset' && 'Reset your password.'}
+        </p>
+
+        <form className="login-form" onSubmit={handleSubmit}>
+          <label>
+            <span>Email</span>
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+          </label>
+
+          {mode !== 'reset' && (
+            <label>
+              <span>Password</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+              />
+            </label>
+          )}
+
+          {mode === 'signup' && (
+            <label>
+              <span>Confirm Password</span>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                required
+              />
+            </label>
+          )}
+
+          {error && <p className="login-error">{error}</p>}
+          {message && <p className="login-message">{message}</p>}
+
+          <button type="submit" disabled={loading}>
+            {loading
+              ? 'Please wait…'
+              : mode === 'signin'
+                ? 'Sign In'
+                : mode === 'signup'
+                  ? 'Create Account'
+                  : 'Send Reset Email'}
+          </button>
+        </form>
+
+        <div className="auth-links">
+          {mode === 'signin' && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  resetMessages()
+                  setMode('signup')
+                }}
+              >
+                Create Account
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  resetMessages()
+                  setMode('reset')
+                }}
+              >
+                Forgot Password?
+              </button>
+            </>
+          )}
+
+          {mode !== 'signin' && (
+            <button
+              type="button"
+              onClick={() => {
+                resetMessages()
+                setMode('signin')
+              }}
+            >
+              Back to Sign In
+            </button>
+          )}
+        </div>
+      </div>
+    </main>
+  )
+}
+
 function App() {
+  const [user, setUser] = useState<User | null>(null)
+  const [authLoading, setAuthLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<Tab>('home')
   const [picks, setPicks] = useState<Picks>({})
   const [tiebreaker, setTiebreaker] = useState('')
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      setUser(firebaseUser)
+      setAuthLoading(false)
+    })
+
+    return unsubscribe
+  }, [])
+
+  if (authLoading) {
+    return <main className="loading-screen">College Pick&apos;em</main>
+  }
+
+  if (!user) {
+    return <LoginPage />
+  }
 
   const page = {
     home: <HomePage picksMade={Object.keys(picks).length} />,
@@ -307,7 +519,7 @@ function App() {
     ),
     standings: <PlaceholderPage title="Standings" />,
     history: <PlaceholderPage title="History" />,
-    settings: <PlaceholderPage title="Settings" />,
+    settings: <SettingsPage user={user} />,
   }[activeTab]
 
   return (
