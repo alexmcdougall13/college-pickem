@@ -4,18 +4,18 @@ import { getFirestore } from 'firebase-admin/firestore'
 const ESPN_SCOREBOARD =
   'https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard'
 
-const ESPN_TEAMS =
-  'https://site.api.espn.com/apis/site/v2/sports/football/college-football/teams?limit=1000&enable=groups&groups=80'
+const ESPN_TEAM =
+  'https://site.api.espn.com/apis/site/v2/sports/football/college-football/teams'
 
 /*
  * ============================================================
  * RATING SETTINGS
  * ============================================================
  *
- * These reproduce the rating system from your spreadsheet.
+ * These reproduce your spreadsheet rating system.
  *
- * If we later build rating settings into the Admin page,
- * these values can move to Firestore.
+ * If you want to change the weighting later, these are the
+ * four numbers to change. They should add up to 1.
  */
 const RATING_CONFIG = {
   weights: {
@@ -48,10 +48,19 @@ const RATING_CONFIG = {
   },
 }
 
+/*
+ * ============================================================
+ * FIREBASE
+ * ============================================================
+ */
+
 const serviceAccount = {
   projectId: process.env.FIREBASE_PROJECT_ID,
   clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-  privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+  privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(
+    /\\n/g,
+    '\n',
+  ),
 }
 
 if (
@@ -70,12 +79,21 @@ initializeApp({
 
 const db = getFirestore()
 
+/*
+ * ============================================================
+ * HELPERS
+ * ============================================================
+ */
+
 function roundToTwo(value) {
-  return Math.round((value + Number.EPSILON) * 100) / 100
+  return Math.round(
+    (value + Number.EPSILON) * 100,
+  ) / 100
 }
 
 function normalizeConferenceName(name = '') {
-  const normalized = name.trim().toLowerCase()
+  const normalized =
+    name.trim().toLowerCase()
 
   const conferenceMap = {
     'southeastern conference': 'SEC',
@@ -96,6 +114,7 @@ function normalizeConferenceName(name = '') {
     'american athletic conference': 'AAC',
     'american conference': 'AAC',
     'the american': 'AAC',
+    american: 'AAC',
     aac: 'AAC',
 
     'conference usa': 'CUSA',
@@ -103,6 +122,7 @@ function normalizeConferenceName(name = '') {
     cusa: 'CUSA',
 
     'mid-american conference': 'MAC',
+    'mid-american': 'MAC',
     mac: 'MAC',
 
     'mountain west conference': 'MWC',
@@ -115,15 +135,27 @@ function normalizeConferenceName(name = '') {
     independent: 'Independent',
     independents: 'Independent',
     'fbs independents': 'Independent',
+
+    fcs: 'FCS',
   }
 
-  return conferenceMap[normalized] ?? name
+  return (
+    conferenceMap[normalized] ??
+    name.trim()
+  )
 }
 
 function getRank(competitor) {
-  const rank = Number(competitor?.curatedRank?.current)
+  const rank =
+    Number(
+      competitor?.curatedRank?.current,
+    )
 
-  if (!Number.isFinite(rank) || rank < 1 || rank > 25) {
+  if (
+    !Number.isFinite(rank) ||
+    rank < 1 ||
+    rank > 25
+  ) {
     return null
   }
 
@@ -131,8 +163,11 @@ function getRank(competitor) {
 }
 
 function getGameName(event) {
-  const competition = event?.competitions?.[0]
-  const notes = competition?.notes ?? []
+  const competition =
+    event?.competitions?.[0]
+
+  const notes =
+    competition?.notes ?? []
 
   for (const note of notes) {
     if (note?.headline) {
@@ -142,7 +177,9 @@ function getGameName(event) {
 
   if (
     typeof event?.name === 'string' &&
-    event.name.toLowerCase().includes('bowl')
+    event.name
+      .toLowerCase()
+      .includes('bowl')
   ) {
     return event.name
   }
@@ -150,23 +187,27 @@ function getGameName(event) {
   return ''
 }
 
-function getAdjustedHomeLine(competition) {
-  const rawSpread = competition?.odds?.[0]?.spread
+/*
+ * Preserve the same betting-line adjustment used by
+ * your existing College Pick'em process.
+ */
+function getAdjustedHomeLine(
+  competition,
+) {
+  const rawSpread =
+    competition?.odds?.[0]?.spread
 
   if (rawSpread == null) {
     return null
   }
 
-  const line = Number(rawSpread)
+  const line =
+    Number(rawSpread)
 
   if (!Number.isFinite(line)) {
     return null
   }
 
-  /*
-   * Preserve the same half-point adjustment used by
-   * the existing College Pick'em process.
-   */
   if (line > 0) {
     return Math.floor(line) - 0.5
   }
@@ -177,6 +218,12 @@ function getAdjustedHomeLine(competition) {
 
   return 0
 }
+
+/*
+ * ============================================================
+ * RATING CALCULATION
+ * ============================================================
+ */
 
 function calculateRating({
   awayRank,
@@ -189,26 +236,40 @@ function calculateRating({
    * Q — Combined
    */
   const awayCombinedRank =
-    awayRank ?? RATING_CONFIG.combinedUnrankedValue
+    awayRank ??
+    RATING_CONFIG.combinedUnrankedValue
 
   const homeCombinedRank =
-    homeRank ?? RATING_CONFIG.combinedUnrankedValue
+    homeRank ??
+    RATING_CONFIG.combinedUnrankedValue
 
   const combined =
-    100 - (awayCombinedRank + homeCombinedRank)
+    100 -
+    (
+      awayCombinedRank +
+      homeCombinedRank
+    )
 
   /*
-   * R — Ranking Difference
+   * R — Difference
    */
   const bothUnranked =
-    awayRank == null && homeRank == null
+    awayRank == null &&
+    homeRank == null
 
-  const rankingDifference = bothUnranked
-    ? 1
-    : Math.abs(
-        (awayRank ?? RATING_CONFIG.differenceUnrankedValue) -
-          (homeRank ?? RATING_CONFIG.differenceUnrankedValue),
-      )
+  const rankingDifference =
+    bothUnranked
+      ? 1
+      : Math.abs(
+          (
+            awayRank ??
+            RATING_CONFIG.differenceUnrankedValue
+          ) -
+            (
+              homeRank ??
+              RATING_CONFIG.differenceUnrankedValue
+            ),
+        )
 
   const difference =
     (25 - rankingDifference) * 4
@@ -219,29 +280,50 @@ function calculateRating({
   const spread =
     homeLine == null
       ? 0
-      : 100 - Math.floor(Math.abs(homeLine))
+      : 100 -
+        Math.floor(
+          Math.abs(homeLine),
+        )
 
   /*
    * T — Conference
    */
   const awayConferenceScore =
-    RATING_CONFIG.conferenceValues[awayConference] ?? 0
+    RATING_CONFIG
+      .conferenceValues[
+        awayConference
+      ] ?? 0
 
   const homeConferenceScore =
-    RATING_CONFIG.conferenceValues[homeConference] ?? 0
+    RATING_CONFIG
+      .conferenceValues[
+        homeConference
+      ] ?? 0
 
   const conference =
-    (awayConferenceScore + homeConferenceScore) * 10
+    (
+      awayConferenceScore +
+      homeConferenceScore
+    ) * 10
 
   /*
-   * U — Final weighted rating
+   * U — Final Rating
    */
-  const rating = roundToTwo(
-    combined * RATING_CONFIG.weights.combined +
-      difference * RATING_CONFIG.weights.difference +
-      spread * RATING_CONFIG.weights.spread +
-      conference * RATING_CONFIG.weights.conference,
-  )
+  const rating =
+    roundToTwo(
+      combined *
+        RATING_CONFIG.weights
+          .combined +
+        difference *
+          RATING_CONFIG.weights
+            .difference +
+        spread *
+          RATING_CONFIG.weights
+            .spread +
+        conference *
+          RATING_CONFIG.weights
+            .conference,
+    )
 
   return {
     combined,
@@ -253,157 +335,16 @@ function calculateRating({
 }
 
 /*
- * ESPN's grouped teams response can contain nested groups.
- * This recursively walks the response and associates every
- * team with the conference/group containing it.
+ * ============================================================
+ * ESPN REQUESTS
+ * ============================================================
  */
-function collectTeamsFromGroup(group, conferenceMap, parentName = '') {
-  if (!group) {
-    return
-  }
-
-  const groupName =
-    group?.name ??
-    group?.shortName ??
-    group?.abbreviation ??
-    parentName
-
-  const normalizedConference =
-    normalizeConferenceName(groupName)
-
-  const teams = group?.teams ?? []
-
-  for (const entry of teams) {
-    const team = entry?.team ?? entry
-
-    if (!team?.id) {
-      continue
-    }
-
-    conferenceMap.set(String(team.id), {
-      teamId: String(team.id),
-
-      teamName:
-        team.location ??
-        team.shortDisplayName ??
-        team.displayName ??
-        'Unknown',
-
-      conference: normalizedConference,
-    })
-  }
-
-  const children =
-    group?.children ??
-    group?.groups ??
-    []
-
-  for (const child of children) {
-    collectTeamsFromGroup(
-      child,
-      conferenceMap,
-      groupName,
-    )
-  }
-}
-
-function walkForGroups(value, conferenceMap) {
-  if (!value || typeof value !== 'object') {
-    return
-  }
-
-  if (
-    Array.isArray(value?.teams) &&
-    (
-      value?.name ||
-      value?.shortName ||
-      value?.abbreviation
-    )
-  ) {
-    collectTeamsFromGroup(value, conferenceMap)
-  }
-
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      walkForGroups(item, conferenceMap)
-    }
-
-    return
-  }
-
-  for (const child of Object.values(value)) {
-    if (child && typeof child === 'object') {
-      walkForGroups(child, conferenceMap)
-    }
-  }
-}
-
-async function fetchConferenceMap() {
-  console.log('Loading current ESPN conference metadata...')
-
-  const response = await fetch(ESPN_TEAMS)
-
-  if (!response.ok) {
-    throw new Error(
-      `ESPN teams request failed: ${response.status}`,
-    )
-  }
-
-  const data = await response.json()
-  const conferenceMap = new Map()
-
-  walkForGroups(data, conferenceMap)
-
-  /*
-   * Some ESPN response versions expose the conference/group
-   * directly on a team entry. This second pass gives us a
-   * fallback for that structure.
-   */
-  const teamEntries =
-    data?.sports?.[0]?.leagues?.[0]?.teams ?? []
-
-  for (const entry of teamEntries) {
-    const team = entry?.team
-
-    if (!team?.id || conferenceMap.has(String(team.id))) {
-      continue
-    }
-
-    const rawConference =
-      team?.conference?.name ??
-      entry?.conference?.name ??
-      team?.groups?.[0]?.name ??
-      ''
-
-    if (!rawConference) {
-      continue
-    }
-
-    conferenceMap.set(String(team.id), {
-      teamId: String(team.id),
-
-      teamName:
-        team.location ??
-        team.shortDisplayName ??
-        team.displayName ??
-        'Unknown',
-
-      conference:
-        normalizeConferenceName(rawConference),
-    })
-  }
-
-  console.log(
-    `Loaded conference metadata for ${conferenceMap.size} teams.`,
-  )
-
-  return conferenceMap
-}
 
 async function fetchScoreboard(date) {
-  const response = await fetch(
-    `${ESPN_SCOREBOARD}?dates=${date}&limit=1000`,
-  )
+  const response =
+    await fetch(
+      `${ESPN_SCOREBOARD}?dates=${date}&limit=1000`,
+    )
 
   if (!response.ok) {
     throw new Error(
@@ -414,67 +355,240 @@ async function fetchScoreboard(date) {
   return response.json()
 }
 
-function parseGame(event, conferenceMap) {
-  const competition = event?.competitions?.[0]
+/*
+ * Get current conference membership from the individual
+ * ESPN team page.
+ *
+ * The live response we inspected contains a value such as:
+ *
+ *   "standingSummary": "1st in Big 12"
+ *
+ * We extract everything following " in ".
+ */
+async function fetchTeamConference(
+  teamId,
+) {
+  const response =
+    await fetch(
+      `${ESPN_TEAM}/${teamId}`,
+    )
 
-  if (!event?.id || !competition) {
+  if (!response.ok) {
+    throw new Error(
+      `ESPN team request failed for ${teamId}: ${response.status}`,
+    )
+  }
+
+  const data =
+    await response.json()
+
+  const team =
+    data?.team
+
+  if (!team?.id) {
+    throw new Error(
+      `ESPN returned no team information for team ${teamId}`,
+    )
+  }
+
+  const standingSummary =
+    team?.standingSummary ??
+    data?.standingSummary ??
+    ''
+
+  const match =
+    standingSummary.match(
+      /\bin\s+(.+)$/i,
+    )
+
+  if (!match) {
+    console.warn(
+      `WARNING: Could not determine conference for ${
+        team.shortDisplayName ??
+        team.displayName ??
+        teamId
+      }. standingSummary="${standingSummary}"`,
+    )
+
+    return {
+      teamId: String(team.id),
+
+      teamName:
+        team.location ??
+        team.shortDisplayName ??
+        team.displayName ??
+        'Unknown',
+
+      conference: null,
+    }
+  }
+
+  const rawConference =
+    match[1].trim()
+
+  const conference =
+    normalizeConferenceName(
+      rawConference,
+    )
+
+  return {
+    teamId: String(team.id),
+
+    teamName:
+      team.location ??
+      team.shortDisplayName ??
+      team.displayName ??
+      'Unknown',
+
+    conference,
+  }
+}
+
+async function fetchConferenceMap(
+  teamIds,
+) {
+  console.log(
+    'Loading current ESPN conference metadata...',
+  )
+
+  const conferenceMap =
+    new Map()
+
+  for (const teamId of teamIds) {
+    const metadata =
+      await fetchTeamConference(
+        teamId,
+      )
+
+    if (!metadata.conference) {
+      /*
+       * Do NOT silently classify an unknown team as Other.
+       * We want to see unresolved teams in the Action log.
+       */
+      console.warn(
+        `${metadata.teamName} → UNRESOLVED`,
+      )
+
+      continue
+    }
+
+    conferenceMap.set(
+      metadata.teamId,
+      metadata,
+    )
+
+    console.log(
+      `${metadata.teamName} → ${metadata.conference}`,
+    )
+  }
+
+  console.log(
+    `Resolved conferences for ${conferenceMap.size} of ${teamIds.size} teams.`,
+  )
+
+  return conferenceMap
+}
+
+/*
+ * ============================================================
+ * GAME PARSER
+ * ============================================================
+ */
+
+function parseGame(
+  event,
+  conferenceMap,
+) {
+  const competition =
+    event?.competitions?.[0]
+
+  if (
+    !event?.id ||
+    !competition
+  ) {
     return null
   }
 
-  const away = competition.competitors?.find(
-    (competitor) =>
-      competitor.homeAway === 'away',
-  )
+  const away =
+    competition.competitors?.find(
+      (competitor) =>
+        competitor.homeAway ===
+        'away',
+    )
 
-  const home = competition.competitors?.find(
-    (competitor) =>
-      competitor.homeAway === 'home',
-  )
+  const home =
+    competition.competitors?.find(
+      (competitor) =>
+        competitor.homeAway ===
+        'home',
+    )
 
   if (!away || !home) {
     return null
   }
 
-  const awayTeamId = String(away.team?.id ?? '')
-  const homeTeamId = String(home.team?.id ?? '')
+  const awayTeamId =
+    String(
+      away.team?.id ?? '',
+    )
 
-  const awayRank = getRank(away)
-  const homeRank = getRank(home)
+  const homeTeamId =
+    String(
+      home.team?.id ?? '',
+    )
+
+  const awayRank =
+    getRank(away)
+
+  const homeRank =
+    getRank(home)
 
   const homeLine =
-    getAdjustedHomeLine(competition)
+    getAdjustedHomeLine(
+      competition,
+    )
 
-  /*
-   * Prefer the current conference map.
-   *
-   * If a team isn't found, we'll distinguish an FCS opponent
-   * from a genuinely unknown team below.
-   */
   const awayMetadata =
-    conferenceMap.get(awayTeamId)
+    conferenceMap.get(
+      awayTeamId,
+    )
 
   const homeMetadata =
-    conferenceMap.get(homeTeamId)
+    conferenceMap.get(
+      homeTeamId,
+    )
 
+  /*
+   * We deliberately use "Unresolved" instead of "Other"
+   * when ESPN conference lookup failed.
+   *
+   * This prevents bad metadata from quietly producing
+   * a seemingly-valid conference rating.
+   */
   const awayConference =
-    awayMetadata?.conference || 'Other'
+    awayMetadata?.conference ??
+    'Unresolved'
 
   const homeConference =
-    homeMetadata?.conference || 'Other'
+    homeMetadata?.conference ??
+    'Unresolved'
 
-  const ratings = calculateRating({
-    awayRank,
-    homeRank,
-    homeLine,
-    awayConference,
-    homeConference,
-  })
+  const ratings =
+    calculateRating({
+      awayRank,
+      homeRank,
+      homeLine,
+      awayConference,
+      homeConference,
+    })
 
   return {
-    gameId: String(event.id),
+    gameId:
+      String(event.id),
 
     seasonWeek:
-      event?.week?.number ?? null,
+      event?.week?.number ??
+      null,
 
     gameName:
       getGameName(event),
@@ -486,7 +600,8 @@ function parseGame(event, conferenceMap) {
 
     awayTeamName:
       away.team?.location ??
-      away.team?.shortDisplayName ??
+      away.team
+        ?.shortDisplayName ??
       away.team?.displayName ??
       'Away',
 
@@ -502,7 +617,8 @@ function parseGame(event, conferenceMap) {
 
     homeTeamName:
       home.team?.location ??
-      home.team?.shortDisplayName ??
+      home.team
+        ?.shortDisplayName ??
       home.team?.displayName ??
       'Home',
 
@@ -533,19 +649,13 @@ function parseGame(event, conferenceMap) {
       ratings.rating,
 
     status:
-      event?.status?.type?.shortDetail ?? '',
+      event?.status?.type
+        ?.shortDetail ?? '',
 
     final:
-      event?.status?.type?.completed === true,
+      event?.status?.type
+        ?.completed === true,
 
-    /*
-     * These are defaults for newly imported games.
-     *
-     * IMPORTANT:
-     * Because Firestore uses merge:true below, an Admin
-     * selection already stored on the document won't be
-     * removed by future ESPN refreshes.
-     */
     selected: false,
 
     tiebreaker: false,
@@ -555,14 +665,20 @@ function parseGame(event, conferenceMap) {
   }
 }
 
-async function syncDate(date) {
-  const conferenceMap =
-    await fetchConferenceMap()
+/*
+ * ============================================================
+ * SYNC
+ * ============================================================
+ */
 
+async function syncDate(date) {
   console.log(
     `Loading ESPN games for ${date}...`,
   )
 
+  /*
+   * First get the games.
+   */
   const data =
     await fetchScoreboard(date)
 
@@ -573,53 +689,123 @@ async function syncDate(date) {
     `ESPN returned ${events.length} events.`,
   )
 
+  /*
+   * Build a unique list of every team playing on this date.
+   */
+  const teamIds =
+    new Set()
+
+  for (const event of events) {
+    const competition =
+      event?.competitions?.[0]
+
+    const competitors =
+      competition?.competitors ??
+      []
+
+    for (
+      const competitor of
+      competitors
+    ) {
+      const teamId =
+        competitor?.team?.id
+
+      if (teamId) {
+        teamIds.add(
+          String(teamId),
+        )
+      }
+    }
+  }
+
+  console.log(
+    `Found ${teamIds.size} unique teams.`,
+  )
+
+  /*
+   * Look up current conference membership for those teams.
+   */
+  const conferenceMap =
+    await fetchConferenceMap(
+      teamIds,
+    )
+
+  /*
+   * Parse and rate every game.
+   */
   const games = []
 
   for (const event of events) {
     const game =
-      parseGame(event, conferenceMap)
+      parseGame(
+        event,
+        conferenceMap,
+      )
 
     if (game) {
       games.push(game)
     }
   }
 
+  /*
+   * Highest rating first.
+   */
   games.sort(
-    (a, b) => b.rating - a.rating,
+    (a, b) =>
+      b.rating - a.rating,
   )
 
   /*
-   * Give each game a ranking based on your rating system.
+   * Ranking based on your rating system.
    */
-  games.forEach((game, index) => {
-    game.ratingRank = index + 1
-  })
+  games.forEach(
+    (game, index) => {
+      game.ratingRank =
+        index + 1
+    },
+  )
 
+  /*
+   * Save to Firestore.
+   */
   let written = 0
 
   for (const game of games) {
-    const ref = db
-      .collection('availableGames')
-      .doc(game.gameId)
+    const ref =
+      db
+        .collection(
+          'availableGames',
+        )
+        .doc(game.gameId)
 
     /*
-     * Preserve Admin selections from an existing document.
+     * Preserve your Admin selections when ESPN refreshes.
      */
-    const existing = await ref.get()
+    const existing =
+      await ref.get()
 
     const dataToSave = {
       ...game,
     }
 
     if (existing.exists) {
-      const existingData = existing.data()
+      const existingData =
+        existing.data()
 
-      if (typeof existingData.selected === 'boolean') {
+      if (
+        typeof existingData
+          .selected ===
+        'boolean'
+      ) {
         dataToSave.selected =
           existingData.selected
       }
 
-      if (typeof existingData.tiebreaker === 'boolean') {
+      if (
+        typeof existingData
+          .tiebreaker ===
+        'boolean'
+      ) {
         dataToSave.tiebreaker =
           existingData.tiebreaker
       }
@@ -627,24 +813,70 @@ async function syncDate(date) {
 
     await ref.set(
       dataToSave,
-      { merge: true },
+      {
+        merge: true,
+      },
     )
 
     written += 1
   }
 
+  console.log('')
   console.log(
     `Saved ${written} rated games to Firestore.`,
   )
 
-  console.log('Top rated games:')
+  console.log('')
+  console.log(
+    'Top rated games:',
+  )
 
-  for (const game of games.slice(0, 10)) {
+  for (
+    const game of
+    games.slice(0, 10)
+  ) {
     console.log(
-      `#${game.ratingRank} ${game.awayTeamName} at ${game.homeTeamName} — ${game.rating}`,
+      `#${game.ratingRank} ${game.awayTeamName} (${game.awayConference}) at ${game.homeTeamName} (${game.homeConference}) — ${game.rating}`,
     )
   }
+
+  /*
+   * Explicitly list unresolved conference mappings.
+   */
+  const unresolvedGames =
+    games.filter(
+      (game) =>
+        game.awayConference ===
+          'Unresolved' ||
+        game.homeConference ===
+          'Unresolved',
+    )
+
+  if (
+    unresolvedGames.length >
+    0
+  ) {
+    console.log('')
+    console.warn(
+      'WARNING: Games with unresolved conference data:',
+    )
+
+    for (
+      const game of
+      unresolvedGames
+    ) {
+      console.warn(
+        `${game.awayTeamName} (${game.awayConference}) at ${game.homeTeamName} (${game.homeConference})`,
+      )
+    }
+  }
 }
+
+/*
+ * ============================================================
+ * RUN
+ * ============================================================
+ */
 
 const date =
   process.argv[2]
@@ -660,4 +892,7 @@ if (
 
 await syncDate(date)
 
-console.log('ESPN sync complete.')
+console.log('')
+console.log(
+  'ESPN sync complete.',
+)
