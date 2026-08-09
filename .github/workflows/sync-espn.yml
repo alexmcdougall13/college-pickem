@@ -4,9 +4,30 @@ on:
   workflow_dispatch:
     inputs:
       date:
-        description: 'Date to sync in YYYYMMDD format'
+        description: 'Date to import in YYYYMMDD format'
         required: true
         default: '20260829'
+
+  # During the regular season:
+  # - Every 5 minutes on Saturdays.
+  # - Every 15 minutes during common Thu/Fri/Sun game windows.
+  # The sync script exits without contacting ESPN when no published
+  # game is within its live-update window.
+  schedule:
+    - cron: '*/5 * * * 6'
+      timezone: 'America/New_York'
+
+    - cron: '*/15 18-23 * * 4,5'
+      timezone: 'America/New_York'
+
+    - cron: '*/15 0-2 * * 5'
+      timezone: 'America/New_York'
+
+    - cron: '*/15 11-23 * * 0'
+      timezone: 'America/New_York'
+
+    - cron: '*/15 0-2 * * 1'
+      timezone: 'America/New_York'
 
 jobs:
   sync:
@@ -35,4 +56,9 @@ jobs:
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
           FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
           FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
-        run: node scripts/sync-espn.mjs "${{ inputs.date }}"
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            node scripts/sync-espn.mjs "${{ inputs.date }}"
+          else
+            node scripts/sync-espn.mjs
+          fi

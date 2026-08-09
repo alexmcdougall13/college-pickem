@@ -50,6 +50,10 @@ type Game = {
   selected: boolean
   tiebreaker: boolean
   order: number
+  final?: boolean
+  winnerTeamId?: string | null
+  awayScore?: number | null
+  homeScore?: number | null
 }
 
 type AvailableGame = {
@@ -67,6 +71,14 @@ type AvailableGame = {
   selected: boolean
   tiebreaker: boolean
 }
+
+type LeaguePlayer = {
+  uid: string
+  name: string
+}
+
+type HomePicks = Record<string, Record<string, string>>
+type HomeTiebreakers = Record<string, number>
 
 type Picks = Record<string, string>
 
@@ -173,12 +185,47 @@ function GameHeader({ game }: { game: Game }) {
 }
 
 function HomePage({
+  currentUserId,
+  players,
+  games,
   picksMade,
   totalGames,
+  homePicks,
+  homeTiebreakers,
 }: {
+  currentUserId: string
+  players: LeaguePlayer[]
+  games: Game[]
   picksMade: number
   totalGames: number
+  homePicks: HomePicks
+  homeTiebreakers: HomeTiebreakers
 }) {
+  const orderedPlayers = [...players].sort((a, b) => {
+    if (a.uid === currentUserId) return -1
+    if (b.uid === currentUserId) return 1
+    return a.name.localeCompare(b.name)
+  })
+
+  const getPickTeam = (game: Game, teamId?: string) => {
+    if (!teamId) return null
+    if (game.awayTeam.id === teamId) return game.awayTeam
+    if (game.homeTeam.id === teamId) return game.homeTeam
+    return null
+  }
+
+  const getWeeklyScore = (player: LeaguePlayer) => {
+    if (!player.uid) return 0
+
+    return games.reduce((score, game) => {
+      if (!game.final || !game.winnerTeamId) return score
+      const pick = homePicks[game.gameId]?.[player.uid]
+      return pick === game.winnerTeamId ? score + 1 : score
+    }, 0)
+  }
+
+  const tiebreakerGame = games.find((game) => game.tiebreaker) ?? null
+
   return (
     <>
       <header className="app-header">
@@ -201,10 +248,298 @@ function HomePage({
               ? 'No games published yet'
               : picksMade === totalGames
                 ? 'All picks completed'
-                : 'Picks are open'}
+                : `${totalGames - picksMade} picks remaining`}
           </strong>
         </div>
       </section>
+
+      {games.length > 0 && (
+        <section style={{ marginTop: 20 }}>
+          <div
+            style={{
+              background: '#fff',
+              border: '1px solid #d9e0ea',
+              borderRadius: 18,
+              overflow: 'hidden',
+              boxShadow: '0 10px 30px rgba(15, 23, 42, 0.05)',
+            }}
+          >
+            <div style={{ overflowX: 'auto' }}>
+              <div style={{ minWidth: 440 }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1.55fr repeat(3, 1fr)',
+                    alignItems: 'center',
+                    borderBottom: '1px solid #e7ebf1',
+                    background: '#f8fafc',
+                  }}
+                >
+                  <div style={{ padding: '14px 12px' }}>
+                    <span className="eyebrow" style={{ margin: 0 }}>
+                      Week 1 Picks
+                    </span>
+                  </div>
+
+                  {orderedPlayers.map((player) => (
+                    <div
+                      key={player.name}
+                      style={{
+                        padding: '12px 6px',
+                        textAlign: 'center',
+                      }}
+                    >
+                      <div style={{ fontWeight: 800, fontSize: 14 }}>
+                        {player.name}
+                      </div>
+                      <div
+                        style={{
+                          marginTop: 3,
+                          fontSize: 20,
+                          lineHeight: 1,
+                          fontWeight: 800,
+                        }}
+                      >
+                        {getWeeklyScore(player)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {games.map((game) => {
+                  const locked = isGameLocked(game.kickoff)
+
+                  return (
+                    <div
+                      key={game.gameId}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1.55fr repeat(3, 1fr)',
+                        alignItems: 'stretch',
+                        borderBottom: '1px solid #edf0f5',
+                      }}
+                    >
+                      <div
+                        style={{
+                          padding: '10px 8px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          textAlign: 'center',
+                          minWidth: 0,
+                          minHeight: 82,
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: '100%',
+                            fontSize: 11,
+                            fontWeight: 800,
+                            lineHeight: 1.15,
+                            textAlign: 'center',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          <div
+                            style={{
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}
+                          >
+                            {game.awayTeam.name}
+                          </div>
+                          <div
+                            style={{
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}
+                          >
+                            at {game.homeTeam.name}
+                          </div>
+                        </div>
+
+                        <div
+                          style={{
+                            width: '100%',
+                            marginTop: 5,
+                            fontSize: 10,
+                            lineHeight: 1.15,
+                            color: '#64748b',
+                            whiteSpace: 'nowrap',
+                            textAlign: 'center',
+                          }}
+                        >
+                          {game.final &&
+                          game.awayScore != null &&
+                          game.homeScore != null
+                            ? `Final · ${game.awayScore}-${game.homeScore}`
+                            : formatKickoff(game.kickoff)}
+                        </div>
+                      </div>
+
+                      {orderedPlayers.map((player) => {
+                        const canReveal =
+                          player.uid === currentUserId || locked
+                        const teamId = player.uid
+                          ? homePicks[game.gameId]?.[player.uid]
+                          : undefined
+                        const team = getPickTeam(game, teamId)
+                        const correct =
+                          game.final &&
+                          Boolean(game.winnerTeamId) &&
+                          teamId === game.winnerTeamId
+                        const incorrect =
+                          game.final &&
+                          Boolean(teamId) &&
+                          Boolean(game.winnerTeamId) &&
+                          teamId !== game.winnerTeamId
+
+                        return (
+                          <div
+                            key={`${game.gameId}-${player.name}`}
+                            style={{
+                              minHeight: 82,
+                              borderLeft: '1px solid #edf0f5',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              padding: 8,
+                            }}
+                          >
+                            {!canReveal ? (
+                              <div
+                                title="Hidden until kickoff"
+                                style={{
+                                  width: 38,
+                                  height: 38,
+                                  borderRadius: '50%',
+                                  background: '#eef2f7',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: 16,
+                                }}
+                              >
+                                🔒
+                              </div>
+                            ) : team ? (
+                              <div
+                                style={{
+                                  position: 'relative',
+                                  width: 54,
+                                  height: 54,
+                                  borderRadius: 14,
+                                  background: correct
+                                    ? '#ecfdf3'
+                                    : incorrect
+                                      ? '#fff1f1'
+                                      : '#f8fafc',
+                                  border: correct
+                                    ? '2px solid #3aaa55'
+                                    : incorrect
+                                      ? '2px solid #dc5a5a'
+                                      : '1px solid #dbe2ea',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                }}
+                              >
+                                <img
+                                  src={team.logo}
+                                  alt={team.name}
+                                  style={{
+                                    width: 38,
+                                    height: 38,
+                                    objectFit: 'contain',
+                                  }}
+                                />
+                                {(correct || incorrect) && (
+                                  <span
+                                    style={{
+                                      position: 'absolute',
+                                      top: -7,
+                                      right: -7,
+                                      width: 20,
+                                      height: 20,
+                                      borderRadius: '50%',
+                                      background: correct ? '#3aaa55' : '#dc5a5a',
+                                      color: '#fff',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      fontSize: 12,
+                                      fontWeight: 900,
+                                    }}
+                                  >
+                                    {correct ? '✓' : '×'}
+                                  </span>
+                                )}
+                              </div>
+                            ) : (
+                              <span style={{ color: '#94a3b8', fontWeight: 700 }}>
+                                —
+                              </span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })}
+
+                {tiebreakerGame && (
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1.55fr repeat(3, 1fr)',
+                      alignItems: 'center',
+                      background: '#f8fafc',
+                    }}
+                  >
+                    <div style={{ padding: '14px 12px' }}>
+                      <div style={{ fontWeight: 800, fontSize: 13 }}>
+                        Tiebreaker
+                      </div>
+                      <div style={{ color: '#64748b', fontSize: 11, marginTop: 2 }}>
+                        Combined points
+                      </div>
+                    </div>
+
+                    {orderedPlayers.map((player) => {
+                      const reveal =
+                        player.uid === currentUserId ||
+                        isGameLocked(tiebreakerGame.kickoff)
+                      const value = player.uid
+                        ? homeTiebreakers[player.uid]
+                        : undefined
+
+                      return (
+                        <div
+                          key={`tb-${player.name}`}
+                          style={{
+                            minHeight: 58,
+                            borderLeft: '1px solid #edf0f5',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: 17,
+                            fontWeight: 800,
+                          }}
+                        >
+                          {reveal ? (value ?? '—') : '🔒'}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
     </>
   )
 }
@@ -589,6 +924,15 @@ function AdminPage({
 
           rating: source.rating ?? 0,
           ratingRank: source.ratingRank ?? null,
+          final: source.final === true,
+          winnerTeamId:
+            typeof source.winnerTeamId === 'string'
+              ? source.winnerTeamId
+              : null,
+          awayScore:
+            typeof source.awayScore === 'number' ? source.awayScore : null,
+          homeScore:
+            typeof source.homeScore === 'number' ? source.homeScore : null,
           publishedAt: serverTimestamp(),
         })
       }
@@ -822,6 +1166,7 @@ function SettingsPage({
 
 function LoginPage() {
   const [mode, setMode] = useState<AuthMode>('signin')
+  const [firstName, setFirstName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -850,7 +1195,22 @@ function LoginPage() {
           return
         }
 
-        await createUserWithEmailAndPassword(auth, email, password)
+        if (!firstName.trim()) {
+          setError('Enter your first name.')
+          return
+        }
+
+        const credential = await createUserWithEmailAndPassword(
+          auth,
+          email,
+          password,
+        )
+
+        await setDoc(doc(db, 'users', credential.user.uid), {
+          name: firstName.trim(),
+          email: credential.user.email ?? email,
+          isAdmin: false,
+        })
       }
 
       if (mode === 'reset') {
@@ -882,6 +1242,18 @@ function LoginPage() {
         </p>
 
         <form className="login-form" onSubmit={handleSubmit}>
+          {mode === 'signup' && (
+            <label>
+              <span>First Name</span>
+              <input
+                type="text"
+                value={firstName}
+                onChange={(event) => setFirstName(event.target.value)}
+                required
+              />
+            </label>
+          )}
+
           <label>
             <span>Email</span>
             <input
@@ -984,6 +1356,9 @@ function App() {
   const [activeTab, setActiveTab] = useState<Tab>('home')
   const [games, setGames] = useState<Game[]>([])
   const [picks, setPicks] = useState<Picks>({})
+  const [leaguePlayers, setLeaguePlayers] = useState<LeaguePlayer[]>([])
+  const [homePicks, setHomePicks] = useState<HomePicks>({})
+  const [homeTiebreakers, setHomeTiebreakers] = useState<HomeTiebreakers>({})
   const [tiebreaker, setTiebreaker] = useState('')
   const [savingGameId, setSavingGameId] =
     useState<string | null>(null)
@@ -1004,22 +1379,14 @@ function App() {
     return unsubscribe
   }, [])
 
-  /*
-   * TEMPORARY ESPN CONFERENCE TEST
-   *
-   * This runs once when the app loads and prints several
-   * ESPN team/conference records to the browser console.
-   *
-   * We'll remove this after confirming ESPN's current
-   * conference data structure.
-   */
-
-
   useEffect(() => {
   if (!user) {
     setIsAdmin(false)
     setGames([])
     setPicks({})
+    setLeaguePlayers([])
+    setHomePicks({})
+    setHomeTiebreakers({})
     setTiebreaker('')
     return
   }
@@ -1035,11 +1402,65 @@ function App() {
           doc(db, 'users', currentUser.uid),
         )
 
+        const currentUserData = userSnapshot.exists()
+          ? userSnapshot.data()
+          : {}
+
         if (userSnapshot.exists()) {
-          setIsAdmin(userSnapshot.data().isAdmin === true)
+          setIsAdmin(currentUserData.isAdmin === true)
         } else {
           setIsAdmin(false)
         }
+
+        const usersSnapshot = await getDocs(collection(db, 'users'))
+        const savedPlayers: LeaguePlayer[] = usersSnapshot.docs.map(
+          (userDocument) => {
+            const data = userDocument.data()
+            const fallbackName =
+              userDocument.id === currentUser.uid && data.isAdmin === true
+                ? 'Alex'
+                : String(data.email ?? '')
+                    .split('@')[0]
+                    .replace(/[^a-zA-Z]/g, '') || 'Player'
+
+            return {
+              uid: userDocument.id,
+              name: String(data.name ?? data.firstName ?? fallbackName),
+            }
+          },
+        )
+
+        const knownPlayerNames = ['Alex', 'Ben', 'Sean']
+        const playerSlots: LeaguePlayer[] = knownPlayerNames.map((name) => {
+          const match = savedPlayers.find(
+            (player) => player.name.toLowerCase() === name.toLowerCase(),
+          )
+
+          if (match) return match
+
+          if (
+            name === 'Alex' &&
+            currentUserData.isAdmin === true &&
+            !savedPlayers.some((player) => player.uid === currentUser.uid)
+          ) {
+            return { uid: currentUser.uid, name: 'Alex' }
+          }
+
+          return { uid: '', name }
+        })
+
+        const currentSavedPlayer = savedPlayers.find(
+          (player) => player.uid === currentUser.uid,
+        )
+
+        if (
+          currentSavedPlayer &&
+          !playerSlots.some((player) => player.uid === currentUser.uid)
+        ) {
+          playerSlots[0] = currentSavedPlayer
+        }
+
+        setLeaguePlayers(playerSlots)
 
         const gamesQuery = query(
           collection(db, 'games'),
@@ -1061,6 +1482,15 @@ function App() {
               selected: data.selected,
               tiebreaker: data.tiebreaker,
               order: data.order,
+              final: data.final === true,
+              winnerTeamId:
+                typeof data.winnerTeamId === 'string'
+                  ? data.winnerTeamId
+                  : null,
+              awayScore:
+                typeof data.awayScore === 'number' ? data.awayScore : null,
+              homeScore:
+                typeof data.homeScore === 'number' ? data.homeScore : null,
               awayTeam: {
                 id: data.awayTeamId,
                 name: data.awayTeamName,
@@ -1108,19 +1538,84 @@ function App() {
 
         setPicks(loadedPicks)
 
+        const loadedHomePicks: HomePicks = {}
+
+        Object.entries(loadedPicks).forEach(([gameId, teamId]) => {
+          loadedHomePicks[gameId] = {
+            ...(loadedHomePicks[gameId] ?? {}),
+            [currentUser.uid]: teamId,
+          }
+        })
+
+        const lockedGames = loadedGames.filter((game) =>
+          isGameLocked(game.kickoff),
+        )
+
+        await Promise.all(
+          lockedGames.map(async (game) => {
+            const revealedSnapshot = await getDocs(
+              query(
+                collection(db, 'picks'),
+                where('gameId', '==', game.gameId),
+              ),
+            )
+
+            revealedSnapshot.forEach((pickDocument) => {
+              const data = pickDocument.data()
+
+              if (data.userId && data.teamId) {
+                loadedHomePicks[game.gameId] = {
+                  ...(loadedHomePicks[game.gameId] ?? {}),
+                  [String(data.userId)]: String(data.teamId),
+                }
+              }
+            })
+          }),
+        )
+
+        setHomePicks(loadedHomePicks)
+
         const tiebreakerId = `${currentUser.uid}_${WEEK_ID}`
 
         const tiebreakerSnapshot = await getDoc(
           doc(db, 'tiebreakers', tiebreakerId),
         )
 
+        const loadedHomeTiebreakers: HomeTiebreakers = {}
+
         if (tiebreakerSnapshot.exists()) {
           const data = tiebreakerSnapshot.data()
 
           if (typeof data.totalPoints === 'number') {
             setTiebreaker(String(data.totalPoints))
+            loadedHomeTiebreakers[currentUser.uid] = data.totalPoints
           }
         }
+
+        const loadedTiebreakerGame =
+          loadedGames.find((game) => game.tiebreaker) ?? null
+
+        if (
+          loadedTiebreakerGame &&
+          isGameLocked(loadedTiebreakerGame.kickoff)
+        ) {
+          const revealedTiebreakers = await getDocs(
+            query(
+              collection(db, 'tiebreakers'),
+              where('gameId', '==', loadedTiebreakerGame.gameId),
+            ),
+          )
+
+          revealedTiebreakers.forEach((document) => {
+            const data = document.data()
+
+            if (data.userId && typeof data.totalPoints === 'number') {
+              loadedHomeTiebreakers[String(data.userId)] = data.totalPoints
+            }
+          })
+        }
+
+        setHomeTiebreakers(loadedHomeTiebreakers)
       } catch (error) {
         console.error(error)
         setSaveError('Unable to load the current week.')
@@ -1156,6 +1651,14 @@ function App() {
       [gameId]: teamId,
     }))
 
+    setHomePicks((current) => ({
+      ...current,
+      [gameId]: {
+        ...(current[gameId] ?? {}),
+        [user.uid]: teamId,
+      },
+    }))
+
     setSavingGameId(gameId)
     setSaveError('')
 
@@ -1181,6 +1684,20 @@ function App() {
           delete next[gameId]
         }
 
+        return next
+      })
+
+      setHomePicks((current) => {
+        const next = { ...current }
+        const gamePicks = { ...(next[gameId] ?? {}) }
+
+        if (previousTeamId) {
+          gamePicks[user.uid] = previousTeamId
+        } else {
+          delete gamePicks[user.uid]
+        }
+
+        next[gameId] = gamePicks
         return next
       })
 
@@ -1220,6 +1737,11 @@ function App() {
       setSaveError('Tiebreaker must be a whole number.')
       return
     }
+
+    setHomeTiebreakers((current) => ({
+      ...current,
+      [user.uid]: points,
+    }))
 
     setSavingTiebreaker(true)
 
@@ -1285,8 +1807,13 @@ function App() {
   if (activeTab === 'home') {
     page = (
       <HomePage
+        currentUserId={user.uid}
+        players={leaguePlayers}
+        games={games}
         picksMade={Object.keys(picks).length}
         totalGames={games.length}
+        homePicks={homePicks}
+        homeTiebreakers={homeTiebreakers}
       />
     )
   } else if (activeTab === 'picks') {
@@ -1322,8 +1849,13 @@ function App() {
   } else {
     page = (
       <HomePage
-        picksMade={0}
+        currentUserId={user.uid}
+        players={leaguePlayers}
+        games={games}
+        picksMade={Object.keys(picks).length}
         totalGames={games.length}
+        homePicks={homePicks}
+        homeTiebreakers={homeTiebreakers}
       />
     )
   }

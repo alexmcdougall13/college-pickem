@@ -187,6 +187,45 @@ function getGameName(event) {
   return ''
 }
 
+
+function getScore(competitor) {
+  const score = Number(competitor?.score)
+
+  return Number.isFinite(score) ? score : null
+}
+
+function getLiveStatus(event) {
+  const status = event?.status ?? {}
+  const type = status?.type ?? {}
+
+  return {
+    status: type?.shortDetail ?? '',
+    statusState: type?.state ?? '',
+    period: Number.isFinite(Number(status?.period))
+      ? Number(status.period)
+      : null,
+    displayClock: status?.displayClock ?? '',
+    final: type?.completed === true,
+  }
+}
+
+function formatEspnDate(dateValue) {
+  const date = new Date(dateValue)
+
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+
+  const year = parts.find((part) => part.type === 'year')?.value
+  const month = parts.find((part) => part.type === 'month')?.value
+  const day = parts.find((part) => part.type === 'day')?.value
+
+  return `${year}${month}${day}`
+}
+
 /*
  * Preserve the same betting-line adjustment used by
  * your existing College Pick'em process.
@@ -633,6 +672,14 @@ function parseGame(
     homeTeamLine:
       homeLine,
 
+    awayScore:
+      getScore(away),
+
+    homeScore:
+      getScore(home),
+
+    ...getLiveStatus(event),
+
     combinedRating:
       ratings.combined,
 
@@ -648,14 +695,6 @@ function parseGame(
     rating:
       ratings.rating,
 
-    status:
-      event?.status?.type
-        ?.shortDetail ?? '',
-
-    final:
-      event?.status?.type
-        ?.completed === true,
-
     selected: false,
 
     tiebreaker: false,
@@ -663,6 +702,125 @@ function parseGame(
     importedAt:
       new Date(),
   }
+}
+
+
+async function updatePublishedGameFromEvent(event) {
+  const competition = event?.competitions?.[0]
+
+  if (!event?.id || !competition) {
+    return false
+  }
+
+  const away = competition.competitors?.find(
+    (competitor) => competitor.homeAway === 'away',
+  )
+
+  const home = competition.competitors?.find(
+    (competitor) => competitor.homeAway === 'home',
+  )
+
+  if (!away || !home) {
+    return false
+  }
+
+  const gameId = String(event.id)
+  const ref = db.collection('games').doc(gameId)
+  const existing = await ref.get()
+
+  if (!existing.exists) {
+    return false
+  }
+
+  const liveStatus = getLiveStatus(event)
+
+  /*
+   * IMPORTANT:
+   * Only live/result fields are refreshed here.
+   * The published betting line, teams, order, tiebreaker,
+   * and other pool settings are intentionally untouched.
+   */
+  await ref.set(
+    {
+      awayScore: getScore(away),
+      homeScore: getScore(home),
+      status: liveStatus.status,
+      statusState: liveStatus.statusState,
+      period: liveStatus.period,
+      displayClock: liveStatus.displayClock,
+      final: liveStatus.final,
+      scoreUpdatedAt: new Date(),
+    },
+    { merge: true },
+  )
+
+  return true
+}
+
+async function getRelevantPublishedDates() {
+  const snapshot = await db.collection('games').get()
+  const now = Date.now()
+
+  /*
+   * Include games beginning within the next 24 hours and games
+   * that began within the previous 8 hours. This covers the
+   * pregame/live/final window without repeatedly asking ESPN
+   * about future weeks.
+   */
+  const earliest = now - 8 * 60 * 60 * 1000
+  const latest = now + 24 * 60 * 60 * 1000
+
+  const dates = new Set()
+
+  snapshot.forEach((document) => {
+    const game = document.data()
+
+    if (game.final === true || !game.kickoff) {
+      return
+    }
+
+    const kickoffMs = new Date(game.kickoff).getTime()
+
+    if (
+      Number.isFinite(kickoffMs) &&
+      kickoffMs >= earliest &&
+      kickoffMs <= latest
+    ) {
+      dates.add(formatEspnDate(game.kickoff))
+    }
+  })
+
+  return [...dates].sort()
+}
+
+async function syncPublishedGames() {
+  const dates = await getRelevantPublishedDates()
+
+  if (dates.length === 0) {
+    console.log(
+      'No published games are within the live-update window. Nothing to sync.',
+    )
+    return
+  }
+
+  console.log(
+    `Live score sync for ESPN date(s): ${dates.join(', ')}`,
+  )
+
+  let updated = 0
+
+  for (const date of dates) {
+    const data = await fetchScoreboard(date)
+    const events = data?.events ?? []
+
+    for (const event of events) {
+      if (await updatePublishedGameFromEvent(event)) {
+        updated += 1
+      }
+    }
+  }
+
+  console.log(`Updated ${updated} published game(s) with live ESPN data.`)
 }
 
 /*
@@ -745,6 +903,8 @@ async function syncDate(date) {
     if (game) {
       games.push(game)
     }
+
+    await updatePublishedGameFromEvent(event)
   }
 
   /*
@@ -881,16 +1041,17 @@ async function syncDate(date) {
 const date =
   process.argv[2]
 
-if (
-  !date ||
-  !/^\d{8}$/.test(date)
-) {
-  throw new Error(
-    'Provide a date in YYYYMMDD format. Example: node scripts/sync-espn.mjs 20260829',
-  )
-}
+if (date) {
+  if (!/^\d{8}$/.test(date)) {
+    throw new Error(
+      'Date must use YYYYMMDD format. Example: node scripts/sync-espn.mjs 20260829',
+    )
+  }
 
-await syncDate(date)
+  await syncDate(date)
+} else {
+  await syncPublishedGames()
+}
 
 console.log('')
 console.log(
