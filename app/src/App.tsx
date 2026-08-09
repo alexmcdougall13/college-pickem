@@ -15,6 +15,7 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  Timestamp,
   where,
   writeBatch,
 } from 'firebase/firestore'
@@ -92,6 +93,10 @@ function formatKickoff(kickoff: string) {
 
 function formatLine(line: number) {
   return line > 0 ? `+${line}` : `${line}`
+}
+
+function isGameLocked(kickoff: string) {
+  return Date.now() >= new Date(kickoff).getTime()
 }
 
 function TeamCard({
@@ -255,7 +260,10 @@ function PicksPage({
                   designation="Away"
                   selected={picks[game.gameId] === game.awayTeam.id}
                   onSelect={() => onPick(game.gameId, game.awayTeam.id)}
-                  disabled={savingGameId === game.gameId}
+                  disabled={
+                    savingGameId === game.gameId ||
+                    isGameLocked(game.kickoff)
+                  }
                 />
 
                 <TeamCard
@@ -263,11 +271,18 @@ function PicksPage({
                   designation="Home"
                   selected={picks[game.gameId] === game.homeTeam.id}
                   onSelect={() => onPick(game.gameId, game.homeTeam.id)}
-                  disabled={savingGameId === game.gameId}
+                  disabled={
+                    savingGameId === game.gameId ||
+                    isGameLocked(game.kickoff)
+                  }
                 />
               </div>
 
-              {savingGameId === game.gameId && (
+              {isGameLocked(game.kickoff) && (
+                <p className="save-status">Picks Locked</p>
+              )}
+
+              {savingGameId === game.gameId && !isGameLocked(game.kickoff) && (
                 <p className="save-status">Saving pick…</p>
               )}
             </section>
@@ -303,13 +318,18 @@ function PicksPage({
               inputMode="numeric"
               placeholder="54"
               value={tiebreaker}
+              disabled={isGameLocked(tiebreakerGame.kickoff)}
               onChange={(event) =>
                 onTiebreakerChange(event.target.value)
               }
             />
           </label>
 
-          {savingTiebreaker && (
+          {isGameLocked(tiebreakerGame.kickoff) && (
+            <p className="save-status">Tiebreaker Locked</p>
+          )}
+
+          {savingTiebreaker && !isGameLocked(tiebreakerGame.kickoff) && (
             <p className="save-status">Saving tiebreaker…</p>
           )}
         </section>
@@ -544,6 +564,7 @@ function AdminPage({
           gameId: game.gameId,
           gameName: source.gameName || '',
           kickoff: source.kickoff,
+          kickoffTimestamp: Timestamp.fromDate(new Date(source.kickoff)),
           selected: true,
           tiebreaker: game.gameId === tiebreakerGameId,
           order: index + 1,
@@ -1121,6 +1142,13 @@ function App() {
   ) {
     if (!user) return
 
+    const game = games.find((item) => item.gameId === gameId)
+
+    if (!game || isGameLocked(game.kickoff)) {
+      setSaveError('This game is locked because kickoff has passed.')
+      return
+    }
+
     const previousTeamId = picks[gameId]
 
     setPicks((current) => ({
@@ -1167,6 +1195,20 @@ function App() {
   async function saveTiebreaker(value: string) {
     if (!user) return
 
+    const tiebreakerGame = games.find(
+      (game) => game.tiebreaker,
+    )
+
+    if (!tiebreakerGame) {
+      setSaveError('No tiebreaker game has been selected.')
+      return
+    }
+
+    if (isGameLocked(tiebreakerGame.kickoff)) {
+      setSaveError('The tiebreaker is locked because kickoff has passed.')
+      return
+    }
+
     setTiebreaker(value)
     setSaveError('')
 
@@ -1176,17 +1218,6 @@ function App() {
 
     if (!Number.isInteger(points) || points < 0) {
       setSaveError('Tiebreaker must be a whole number.')
-      return
-    }
-
-    const tiebreakerGame = games.find(
-      (game) => game.tiebreaker,
-    )
-
-    if (!tiebreakerGame) {
-      setSaveError(
-        'No tiebreaker game has been selected.',
-      )
       return
     }
 
