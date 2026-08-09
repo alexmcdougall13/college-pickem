@@ -16,6 +16,7 @@ import {
   serverTimestamp,
   setDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore'
 import { auth, db } from './firebase/firebase'
 import './App.css'
@@ -48,6 +49,22 @@ type Game = {
   selected: boolean
   tiebreaker: boolean
   order: number
+}
+
+type AvailableGame = {
+  id: string
+  gameId: string
+  gameName: string
+  kickoff: string
+  awayTeamName: string
+  awayTeamRank?: number
+  homeTeamName: string
+  homeTeamRank?: number
+  homeTeamLine: number | null
+  rating: number
+  ratingRank: number
+  selected: boolean
+  tiebreaker: boolean
 }
 
 type Picks = Record<string, string>
@@ -311,25 +328,442 @@ function PlaceholderPage({ title }: { title: string }) {
   )
 }
 
-function AdminPage() {
+function AdminPage({
+  onPublished,
+}: {
+  onPublished: () => Promise<void>
+}) {
+  const [availableGames, setAvailableGames] = useState<AvailableGame[]>([])
+  const [loading, setLoading] = useState(true)
+  const [savingId, setSavingId] = useState<string | null>(null)
+  const [publishing, setPublishing] = useState(false)
+  const [publishMessage, setPublishMessage] = useState('')
+  const [error, setError] = useState('')
+
+  async function loadAvailableGames() {
+    setLoading(true)
+    setError('')
+
+    try {
+      const snapshot = await getDocs(collection(db, 'availableGames'))
+
+      const loadedGames: AvailableGame[] = snapshot.docs
+        .map((gameDocument) => {
+          const data = gameDocument.data()
+
+          return {
+            id: gameDocument.id,
+            gameId: String(data.gameId ?? gameDocument.id),
+            gameName: String(data.gameName ?? ''),
+            kickoff: String(data.kickoff ?? ''),
+            awayTeamName: String(data.awayTeamName ?? 'Away'),
+            awayTeamRank:
+              typeof data.awayTeamRank === 'number'
+                ? data.awayTeamRank
+                : undefined,
+            homeTeamName: String(data.homeTeamName ?? 'Home'),
+            homeTeamRank:
+              typeof data.homeTeamRank === 'number'
+                ? data.homeTeamRank
+                : undefined,
+            homeTeamLine:
+              typeof data.homeTeamLine === 'number'
+                ? data.homeTeamLine
+                : null,
+            rating:
+              typeof data.rating === 'number' ? data.rating : 0,
+            ratingRank:
+              typeof data.ratingRank === 'number'
+                ? data.ratingRank
+                : 9999,
+            selected: data.selected === true,
+            tiebreaker: data.tiebreaker === true,
+          }
+        })
+        .sort((a, b) => {
+          if (a.ratingRank !== b.ratingRank) {
+            return a.ratingRank - b.ratingRank
+          }
+
+          return b.rating - a.rating
+        })
+
+      setAvailableGames(loadedGames)
+    } catch (loadError) {
+      console.error(loadError)
+      setError('Unable to load available games.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadAvailableGames()
+  }, [])
+
+  async function toggleSelection(game: AvailableGame) {
+    const nextSelected = !game.selected
+
+    setSavingId(game.id)
+    setError('')
+
+    setAvailableGames((current) =>
+      current.map((item) =>
+        item.id === game.id
+          ? {
+              ...item,
+              selected: nextSelected,
+              tiebreaker: nextSelected ? item.tiebreaker : false,
+            }
+          : item,
+      ),
+    )
+
+    try {
+      await setDoc(
+        doc(db, 'availableGames', game.id),
+        {
+          selected: nextSelected,
+          ...(nextSelected ? {} : { tiebreaker: false }),
+        },
+        { merge: true },
+      )
+    } catch (saveError) {
+      console.error(saveError)
+      setError('Unable to save the game selection.')
+      await loadAvailableGames()
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  async function toggleTiebreaker(game: AvailableGame) {
+    if (!game.selected) return
+
+    const nextTiebreaker = !game.tiebreaker
+
+    setSavingId(game.id)
+    setError('')
+
+    const previousGames = availableGames
+
+    setAvailableGames((current) =>
+      current.map((item) => ({
+        ...item,
+        tiebreaker:
+          item.id === game.id ? nextTiebreaker : false,
+      })),
+    )
+
+    try {
+      const batch = writeBatch(db)
+
+      for (const item of previousGames) {
+        if (item.tiebreaker && item.id !== game.id) {
+          batch.set(
+            doc(db, 'availableGames', item.id),
+            { tiebreaker: false },
+            { merge: true },
+          )
+        }
+      }
+
+      batch.set(
+        doc(db, 'availableGames', game.id),
+        { tiebreaker: nextTiebreaker },
+        { merge: true },
+      )
+
+      await batch.commit()
+    } catch (saveError) {
+      console.error(saveError)
+      setError('Unable to save the tiebreaker selection.')
+      await loadAvailableGames()
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  async function publishWeek() {
+    const selectedGames = availableGames.filter((game) => game.selected)
+    const selectedTiebreakers = selectedGames.filter((game) => game.tiebreaker)
+
+    setError('')
+    setPublishMessage('')
+
+    if (selectedGames.length === 0) {
+      setError('Select at least one game before publishing.')
+      return
+    }
+
+    if (selectedTiebreakers.length !== 1) {
+      setError('Select exactly one tiebreaker game before publishing.')
+      return
+    }
+
+    const tiebreakerGameId = selectedTiebreakers[0].gameId
+
+    const orderedGames = [...selectedGames].sort((a, b) => {
+      const kickoffDifference =
+        new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime()
+
+      if (kickoffDifference !== 0) {
+        return kickoffDifference
+      }
+
+      return b.rating - a.rating
+    })
+
+    setPublishing(true)
+
+    try {
+      const batch = writeBatch(db)
+
+      const existingGamesQuery = query(
+        collection(db, 'games'),
+        where('weekId', '==', WEEK_ID),
+      )
+
+      const existingGamesSnapshot = await getDocs(existingGamesQuery)
+
+      for (const existingGame of existingGamesSnapshot.docs) {
+        batch.delete(existingGame.ref)
+      }
+
+      for (let index = 0; index < orderedGames.length; index += 1) {
+        const game = orderedGames[index]
+        const sourceSnapshot = await getDoc(doc(db, 'availableGames', game.id))
+        const source = sourceSnapshot.data()
+
+        if (!source) {
+          throw new Error(`Missing available game ${game.id}`)
+        }
+
+        batch.set(doc(db, 'games', game.gameId), {
+          weekId: WEEK_ID,
+          gameId: game.gameId,
+          gameName: source.gameName || '',
+          kickoff: source.kickoff,
+          selected: true,
+          tiebreaker: game.gameId === tiebreakerGameId,
+          order: index + 1,
+
+          awayTeamId: source.awayTeamId,
+          awayTeamName: source.awayTeamName,
+          awayTeamRank: source.awayTeamRank ?? null,
+          awayTeamLogo: source.awayTeamLogo || '',
+          awayTeamLine:
+            typeof source.homeTeamLine === 'number'
+              ? -source.homeTeamLine
+              : 0,
+
+          homeTeamId: source.homeTeamId,
+          homeTeamName: source.homeTeamName,
+          homeTeamRank: source.homeTeamRank ?? null,
+          homeTeamLogo: source.homeTeamLogo || '',
+          homeTeamLine:
+            typeof source.homeTeamLine === 'number'
+              ? source.homeTeamLine
+              : 0,
+
+          rating: source.rating ?? 0,
+          ratingRank: source.ratingRank ?? null,
+          publishedAt: serverTimestamp(),
+        })
+      }
+
+      await batch.commit()
+      await onPublished()
+
+      setPublishMessage(
+        `Week 1 published with ${orderedGames.length} games. Tiebreaker is last.`,
+      )
+    } catch (publishError) {
+      console.error(publishError)
+      setError('Unable to publish Week 1.')
+    } finally {
+      setPublishing(false)
+    }
+  }
+
+  const selectedCount = availableGames.filter((game) => game.selected).length
+
   return (
-    <section className="page-placeholder">
-      <p className="eyebrow">League Management</p>
-      <h1>Admin</h1>
+    <section className="admin-page">
+      <header className="page-header">
+        <p className="eyebrow">League Management</p>
+        <h1>Admin</h1>
+        <p className="subtitle">
+          {selectedCount} of {availableGames.length} games selected
+        </p>
+        {error && <p className="login-error">{error}</p>}
+      </header>
 
-      <p>Your account has administrator access.</p>
+      {!loading && availableGames.length > 0 && (
+        <section className="week-card">
+          <p className="week-label">Week 1</p>
+          <h2>Publish Picks</h2>
+          <div className="pick-status">
+            <span>
+              {selectedCount} games selected
+            </span>
+            <strong>
+              {availableGames.some((game) => game.selected && game.tiebreaker)
+                ? 'Tiebreaker selected'
+                : 'Choose a tiebreaker'}
+            </strong>
+          </div>
 
-      <section className="week-card">
-        <p className="week-label">Current Week</p>
-        <h2>Week 1</h2>
+          <button
+            type="button"
+            className="settings-signout"
+            onClick={publishWeek}
+            disabled={publishing || savingId !== null}
+            style={{ marginTop: 16 }}
+          >
+            {publishing ? 'Publishing…' : 'Publish Week 1'}
+          </button>
 
-        <div className="pick-status">
-          <strong>Admin setup successful</strong>
-          <span>
-            Game selection and publishing controls are coming next.
-          </span>
+          {publishMessage && (
+            <p className="login-message" style={{ marginTop: 12 }}>
+              {publishMessage}
+            </p>
+          )}
+        </section>
+      )}
+
+      {loading ? (
+        <section className="week-card">
+          <strong>Loading available games…</strong>
+        </section>
+      ) : availableGames.length === 0 ? (
+        <section className="week-card">
+          <strong>No ESPN games have been imported yet.</strong>
+        </section>
+      ) : (
+        <div
+          style={{
+            overflowX: 'auto',
+            background: 'white',
+            border: '1px solid #d9e0ea',
+            borderRadius: 18,
+          }}
+        >
+          <table
+            style={{
+              width: '100%',
+              minWidth: 760,
+              borderCollapse: 'collapse',
+              fontSize: 14,
+            }}
+          >
+            <thead>
+              <tr
+                style={{
+                  textAlign: 'left',
+                  borderBottom: '1px solid #d9e0ea',
+                }}
+              >
+                <th style={{ padding: '14px 10px', textAlign: 'center' }}>
+                  Ranking
+                </th>
+                <th style={{ padding: '14px 10px' }}>Kickoff Time</th>
+                <th style={{ padding: '14px 10px' }}>Away</th>
+                <th style={{ padding: '14px 10px' }}>Home</th>
+                <th style={{ padding: '14px 10px', textAlign: 'center' }}>
+                  Rating
+                </th>
+                <th style={{ padding: '14px 10px', textAlign: 'center' }}>
+                  Selection
+                </th>
+                <th style={{ padding: '14px 10px', textAlign: 'center' }}>
+                  Tiebreaker
+                </th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {availableGames.map((game) => (
+                <tr
+                  key={game.id}
+                  style={{
+                    borderBottom: '1px solid #edf0f5',
+                    opacity: savingId === game.id ? 0.6 : 1,
+                  }}
+                >
+                  <td style={{ padding: '12px 10px', textAlign: 'center' }}>
+                    {game.ratingRank}
+                  </td>
+
+                  <td style={{ padding: '12px 10px', whiteSpace: 'nowrap' }}>
+                    {game.kickoff ? formatKickoff(game.kickoff) : '—'}
+                  </td>
+
+                  <td style={{ padding: '12px 10px', whiteSpace: 'nowrap' }}>
+                    {game.awayTeamRank && (
+                      <strong style={{ marginRight: 6 }}>
+                        {game.awayTeamRank}
+                      </strong>
+                    )}
+                    {game.awayTeamName}
+                    {game.homeTeamLine != null && (
+                      <strong style={{ marginLeft: 8 }}>
+                        {formatLine(-game.homeTeamLine)}
+                      </strong>
+                    )}
+                  </td>
+
+                  <td style={{ padding: '12px 10px', whiteSpace: 'nowrap' }}>
+                    {game.homeTeamRank && (
+                      <strong style={{ marginRight: 6 }}>
+                        {game.homeTeamRank}
+                      </strong>
+                    )}
+                    {game.homeTeamName}
+                    {game.homeTeamLine != null && (
+                      <strong style={{ marginLeft: 8 }}>
+                        {formatLine(game.homeTeamLine)}
+                      </strong>
+                    )}
+                  </td>
+
+                  <td
+                    style={{
+                      padding: '12px 10px',
+                      textAlign: 'center',
+                      fontWeight: 700,
+                    }}
+                  >
+                    {game.rating.toFixed(2)}
+                  </td>
+
+                  <td style={{ padding: '12px 10px', textAlign: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={game.selected}
+                      disabled={savingId !== null}
+                      onChange={() => toggleSelection(game)}
+                      aria-label={`Select ${game.awayTeamName} at ${game.homeTeamName}`}
+                      style={{ width: 20, height: 20 }}
+                    />
+                  </td>
+
+                  <td style={{ padding: '12px 10px', textAlign: 'center' }}>
+                    <input
+                      type="checkbox"
+                      checked={game.tiebreaker}
+                      disabled={!game.selected || savingId !== null}
+                      onChange={() => toggleTiebreaker(game)}
+                      aria-label={`Use ${game.awayTeamName} at ${game.homeTeamName} as tiebreaker`}
+                      style={{ width: 20, height: 20 }}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      </section>
+      )}
     </section>
   )
 }
@@ -535,6 +969,7 @@ function App() {
   const [savingTiebreaker, setSavingTiebreaker] =
     useState(false)
   const [saveError, setSaveError] = useState('')
+  const [gamesRefreshKey, setGamesRefreshKey] = useState(0)
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(
@@ -674,7 +1109,11 @@ function App() {
     }
 
     loadUserData()
-  }, [user])
+  }, [user, gamesRefreshKey])
+
+  async function refreshPublishedGames() {
+    setGamesRefreshKey((current) => current + 1)
+  }
 
   async function savePick(
     gameId: string,
@@ -848,7 +1287,7 @@ function App() {
     activeTab === 'admin' &&
     isAdmin
   ) {
-    page = <AdminPage />
+    page = <AdminPage onPublished={refreshPublishedGames} />
   } else {
     page = (
       <HomePage
