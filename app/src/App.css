@@ -104,8 +104,7 @@ h2 {
   bottom: 0;
   z-index: 10;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  width: min(100%, 480px);
+grid-template-columns: repeat(auto-fit, minmax(0, 1fr));  width: min(100%, 480px);
   padding: 10px 8px calc(10px + env(safe-area-inset-bottom));
   border-top: 1px solid #dbe2ea;
   background: rgba(255, 255, 255, 0.96);

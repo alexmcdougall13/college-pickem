@@ -20,7 +20,14 @@ import {
 import { auth, db } from './firebase/firebase'
 import './App.css'
 
-type Tab = 'home' | 'picks' | 'standings' | 'history' | 'settings'
+type Tab =
+  | 'home'
+  | 'picks'
+  | 'standings'
+  | 'history'
+  | 'settings'
+  | 'admin'
+
 type AuthMode = 'signin' | 'signup' | 'reset'
 
 type Team = {
@@ -33,82 +40,27 @@ type Team = {
 
 type Game = {
   id: string
+  gameId: string
   gameName?: string
   kickoff: string
   awayTeam: Team
   homeTeam: Team
+  selected: boolean
+  tiebreaker: boolean
+  order: number
 }
 
 type Picks = Record<string, string>
 
 const WEEK_ID = '2026-week-1'
 
-const tabs: { id: Tab; label: string; icon: string }[] = [
+const regularTabs: { id: Tab; label: string; icon: string }[] = [
   { id: 'home', label: 'Home', icon: '⌂' },
   { id: 'picks', label: 'Picks', icon: '🏈' },
   { id: 'standings', label: 'Standings', icon: '▥' },
   { id: 'history', label: 'History', icon: '↺' },
   { id: 'settings', label: 'Settings', icon: '⚙' },
 ]
-
-const games: Game[] = [
-  {
-    id: 'game-1',
-    kickoff: '2026-08-29T19:30:00Z',
-    awayTeam: {
-      id: 'ohio-state',
-      name: 'Ohio State',
-      rank: 4,
-      logo: 'https://a.espncdn.com/i/teamlogos/ncaa/500/194.png',
-      line: 3.5,
-    },
-    homeTeam: {
-      id: 'texas',
-      name: 'Texas',
-      rank: 2,
-      logo: 'https://a.espncdn.com/i/teamlogos/ncaa/500/251.png',
-      line: -3.5,
-    },
-  },
-  {
-    id: 'game-2',
-    gameName: 'Chick-fil-A Kickoff Game',
-    kickoff: '2026-08-30T00:00:00Z',
-    awayTeam: {
-      id: 'alabama',
-      name: 'Alabama',
-      rank: 8,
-      logo: 'https://a.espncdn.com/i/teamlogos/ncaa/500/333.png',
-      line: -2.5,
-    },
-    homeTeam: {
-      id: 'florida-state',
-      name: 'Florida State',
-      logo: 'https://a.espncdn.com/i/teamlogos/ncaa/500/52.png',
-      line: 2.5,
-    },
-  },
-  {
-    id: 'game-3',
-    kickoff: '2026-08-30T23:30:00Z',
-    awayTeam: {
-      id: 'notre-dame',
-      name: 'Notre Dame',
-      rank: 6,
-      logo: 'https://a.espncdn.com/i/teamlogos/ncaa/500/87.png',
-      line: -1.5,
-    },
-    homeTeam: {
-      id: 'miami',
-      name: 'Miami',
-      rank: 10,
-      logo: 'https://a.espncdn.com/i/teamlogos/ncaa/500/2390.png',
-      line: 1.5,
-    },
-  },
-]
-
-const tiebreakerGame = games[0]
 
 function formatKickoff(kickoff: string) {
   return new Intl.DateTimeFormat(undefined, {
@@ -221,10 +173,13 @@ function HomePage({
           <span>
             {picksMade} of {totalGames} picks made
           </span>
+
           <strong>
-            {picksMade === totalGames
-              ? 'All picks completed'
-              : 'Picks are open'}
+            {totalGames === 0
+              ? 'No games published yet'
+              : picksMade === totalGames
+                ? 'All picks completed'
+                : 'Picks are open'}
           </strong>
         </div>
       </section>
@@ -233,6 +188,8 @@ function HomePage({
 }
 
 function PicksPage({
+  games,
+  tiebreakerGame,
   picks,
   onPick,
   tiebreaker,
@@ -241,6 +198,8 @@ function PicksPage({
   savingTiebreaker,
   saveError,
 }: {
+  games: Game[]
+  tiebreakerGame: Game | null
   picks: Picks
   onPick: (gameId: string, teamId: string) => Promise<void>
   tiebreaker: string
@@ -263,71 +222,81 @@ function PicksPage({
         {saveError && <p className="login-error">{saveError}</p>}
       </header>
 
-      <div className="games-list">
-        {games.map((game) => (
-          <section className="game-section" key={game.id}>
-            <GameHeader game={game} />
+      {games.length === 0 ? (
+        <section className="week-card">
+          <strong>No games have been published yet.</strong>
+        </section>
+      ) : (
+        <div className="games-list">
+          {games.map((game) => (
+            <section className="game-section" key={game.id}>
+              <GameHeader game={game} />
 
-            <div className="team-grid">
-              <TeamCard
-                team={game.awayTeam}
-                designation="Away"
-                selected={picks[game.id] === game.awayTeam.id}
-                onSelect={() => onPick(game.id, game.awayTeam.id)}
-                disabled={savingGameId === game.id}
-              />
+              <div className="team-grid">
+                <TeamCard
+                  team={game.awayTeam}
+                  designation="Away"
+                  selected={picks[game.gameId] === game.awayTeam.id}
+                  onSelect={() => onPick(game.gameId, game.awayTeam.id)}
+                  disabled={savingGameId === game.gameId}
+                />
 
-              <TeamCard
-                team={game.homeTeam}
-                designation="Home"
-                selected={picks[game.id] === game.homeTeam.id}
-                onSelect={() => onPick(game.id, game.homeTeam.id)}
-                disabled={savingGameId === game.id}
-              />
-            </div>
+                <TeamCard
+                  team={game.homeTeam}
+                  designation="Home"
+                  selected={picks[game.gameId] === game.homeTeam.id}
+                  onSelect={() => onPick(game.gameId, game.homeTeam.id)}
+                  disabled={savingGameId === game.gameId}
+                />
+              </div>
 
-            {savingGameId === game.id && (
-              <p className="save-status">Saving pick…</p>
-            )}
-          </section>
-        ))}
-      </div>
-
-      <section className="tiebreaker-section">
-        <div className="tiebreaker-label">Tiebreaker</div>
-
-        <GameHeader game={tiebreakerGame} />
-
-        <div className="team-grid">
-          <StaticTeamCard
-            team={tiebreakerGame.awayTeam}
-            designation="Away"
-          />
-
-          <StaticTeamCard
-            team={tiebreakerGame.homeTeam}
-            designation="Home"
-          />
+              {savingGameId === game.gameId && (
+                <p className="save-status">Saving pick…</p>
+              )}
+            </section>
+          ))}
         </div>
+      )}
 
-        <label className="tiebreaker-input">
-          <span>Predicted combined total points</span>
+      {tiebreakerGame && (
+        <section className="tiebreaker-section">
+          <div className="tiebreaker-label">Tiebreaker</div>
 
-          <input
-            type="number"
-            min="0"
-            step="1"
-            inputMode="numeric"
-            placeholder="54"
-            value={tiebreaker}
-            onChange={(event) => onTiebreakerChange(event.target.value)}
-          />
-        </label>
+          <GameHeader game={tiebreakerGame} />
 
-        {savingTiebreaker && (
-          <p className="save-status">Saving tiebreaker…</p>
-        )}
-      </section>
+          <div className="team-grid">
+            <StaticTeamCard
+              team={tiebreakerGame.awayTeam}
+              designation="Away"
+            />
+
+            <StaticTeamCard
+              team={tiebreakerGame.homeTeam}
+              designation="Home"
+            />
+          </div>
+
+          <label className="tiebreaker-input">
+            <span>Predicted combined total points</span>
+
+            <input
+              type="number"
+              min="0"
+              step="1"
+              inputMode="numeric"
+              placeholder="54"
+              value={tiebreaker}
+              onChange={(event) =>
+                onTiebreakerChange(event.target.value)
+              }
+            />
+          </label>
+
+          {savingTiebreaker && (
+            <p className="save-status">Saving tiebreaker…</p>
+          )}
+        </section>
+      )}
     </>
   )
 }
@@ -342,7 +311,36 @@ function PlaceholderPage({ title }: { title: string }) {
   )
 }
 
-function SettingsPage({ user }: { user: User }) {
+function AdminPage() {
+  return (
+    <section className="page-placeholder">
+      <p className="eyebrow">League Management</p>
+      <h1>Admin</h1>
+
+      <p>Your account has administrator access.</p>
+
+      <section className="week-card">
+        <p className="week-label">Current Week</p>
+        <h2>Week 1</h2>
+
+        <div className="pick-status">
+          <strong>Admin setup successful</strong>
+          <span>
+            Game selection and publishing controls are coming next.
+          </span>
+        </div>
+      </section>
+    </section>
+  )
+}
+
+function SettingsPage({
+  user,
+  isAdmin,
+}: {
+  user: User
+  isAdmin: boolean
+}) {
   async function handleSignOut() {
     await signOut(auth)
   }
@@ -351,7 +349,10 @@ function SettingsPage({ user }: { user: User }) {
     <section className="page-placeholder">
       <p className="eyebrow">College Pick&apos;em</p>
       <h1>Settings</h1>
+
       <p>Signed in as {user.email}</p>
+
+      {isAdmin && <p>Administrator account</p>}
 
       <button
         type="button"
@@ -420,7 +421,8 @@ function LoginPage() {
 
         <p className="subtitle">
           {mode === 'signin' && 'Sign in to make your picks.'}
-          {mode === 'signup' && 'Create your College Pick’em account.'}
+          {mode === 'signup' &&
+            'Create your College Pick’em account.'}
           {mode === 'reset' && 'Reset your password.'}
         </p>
 
@@ -441,7 +443,9 @@ function LoginPage() {
               <input
                 type="password"
                 value={password}
-                onChange={(event) => setPassword(event.target.value)}
+                onChange={(event) =>
+                  setPassword(event.target.value)
+                }
                 required
               />
             </label>
@@ -453,7 +457,9 @@ function LoginPage() {
               <input
                 type="password"
                 value={confirmPassword}
-                onChange={(event) => setConfirmPassword(event.target.value)}
+                onChange={(event) =>
+                  setConfirmPassword(event.target.value)
+                }
                 required
               />
             </label>
@@ -517,56 +523,137 @@ function LoginPage() {
 
 function App() {
   const [user, setUser] = useState<User | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
   const [authLoading, setAuthLoading] = useState(true)
-  const [picksLoading, setPicksLoading] = useState(false)
+  const [dataLoading, setDataLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>('home')
+  const [games, setGames] = useState<Game[]>([])
   const [picks, setPicks] = useState<Picks>({})
   const [tiebreaker, setTiebreaker] = useState('')
-  const [savingGameId, setSavingGameId] = useState<string | null>(null)
-  const [savingTiebreaker, setSavingTiebreaker] = useState(false)
+  const [savingGameId, setSavingGameId] =
+    useState<string | null>(null)
+  const [savingTiebreaker, setSavingTiebreaker] =
+    useState(false)
   const [saveError, setSaveError] = useState('')
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser)
-      setAuthLoading(false)
-    })
+    const unsubscribe = onAuthStateChanged(
+      auth,
+      (firebaseUser) => {
+        setUser(firebaseUser)
+        setAuthLoading(false)
+      },
+    )
 
     return unsubscribe
   }, [])
 
-  useEffect(() => {
-    if (!user) {
-      setPicks({})
-      setTiebreaker('')
-      return
-    }
+  /*
+   * TEMPORARY ESPN CONFERENCE TEST
+   *
+   * This runs once when the app loads and prints several
+   * ESPN team/conference records to the browser console.
+   *
+   * We'll remove this after confirming ESPN's current
+   * conference data structure.
+   */
 
-    async function loadUserData() {
-      setPicksLoading(true)
+
+  useEffect(() => {
+  if (!user) {
+    setIsAdmin(false)
+    setGames([])
+    setPicks({})
+    setTiebreaker('')
+    return
+  }
+
+  const currentUser = user
+
+  async function loadUserData() {
+      setDataLoading(true)
       setSaveError('')
 
       try {
+        const userSnapshot = await getDoc(
+          doc(db, 'users', currentUser.uid),
+        )
+
+        if (userSnapshot.exists()) {
+          setIsAdmin(userSnapshot.data().isAdmin === true)
+        } else {
+          setIsAdmin(false)
+        }
+
+        const gamesQuery = query(
+          collection(db, 'games'),
+          where('weekId', '==', WEEK_ID),
+          where('selected', '==', true),
+        )
+
+        const gamesSnapshot = await getDocs(gamesQuery)
+
+        const loadedGames: Game[] = gamesSnapshot.docs
+          .map((gameDocument) => {
+            const data = gameDocument.data()
+
+            return {
+              id: gameDocument.id,
+              gameId: data.gameId,
+              gameName: data.gameName || '',
+              kickoff: data.kickoff,
+              selected: data.selected,
+              tiebreaker: data.tiebreaker,
+              order: data.order,
+              awayTeam: {
+                id: data.awayTeamId,
+                name: data.awayTeamName,
+                rank: data.awayTeamRank,
+                logo: data.awayTeamLogo,
+                line: data.awayTeamLine,
+              },
+              homeTeam: {
+                id: data.homeTeamId,
+                name: data.homeTeamName,
+                rank: data.homeTeamRank,
+                logo: data.homeTeamLogo,
+                line: data.homeTeamLine,
+              },
+            }
+          })
+          .sort((a, b) => a.order - b.order)
+
+        setGames(loadedGames)
+
         const picksQuery = query(
           collection(db, 'picks'),
-          where('userId', '==', user.uid),
+          where('userId', '==', currentUser.uid),
           where('weekId', '==', WEEK_ID),
         )
 
-        const snapshot = await getDocs(picksQuery)
+        const picksSnapshot = await getDocs(picksQuery)
         const loadedPicks: Picks = {}
 
-        snapshot.forEach((pickDocument) => {
+        const currentGameIds = new Set(
+          loadedGames.map((game) => game.gameId),
+        )
+
+        picksSnapshot.forEach((pickDocument) => {
           const data = pickDocument.data()
 
-          if (data.gameId && data.teamId) {
+          if (
+            data.gameId &&
+            data.teamId &&
+            currentGameIds.has(data.gameId)
+          ) {
             loadedPicks[data.gameId] = data.teamId
           }
         })
 
         setPicks(loadedPicks)
 
-        const tiebreakerId = `${user.uid}_${WEEK_ID}`
+        const tiebreakerId = `${currentUser.uid}_${WEEK_ID}`
+
         const tiebreakerSnapshot = await getDoc(
           doc(db, 'tiebreakers', tiebreakerId),
         )
@@ -580,16 +667,19 @@ function App() {
         }
       } catch (error) {
         console.error(error)
-        setSaveError('Unable to load your saved picks.')
+        setSaveError('Unable to load the current week.')
       } finally {
-        setPicksLoading(false)
+        setDataLoading(false)
       }
     }
 
     loadUserData()
   }, [user])
 
-  async function savePick(gameId: string, teamId: string) {
+  async function savePick(
+    gameId: string,
+    teamId: string,
+  ) {
     if (!user) return
 
     const previousTeamId = picks[gameId]
@@ -627,7 +717,9 @@ function App() {
         return next
       })
 
-      setSaveError('Your pick could not be saved. Please try again.')
+      setSaveError(
+        'Your pick could not be saved. Please try again.',
+      )
     } finally {
       setSavingGameId(null)
     }
@@ -648,47 +740,90 @@ function App() {
       return
     }
 
+    const tiebreakerGame = games.find(
+      (game) => game.tiebreaker,
+    )
+
+    if (!tiebreakerGame) {
+      setSaveError(
+        'No tiebreaker game has been selected.',
+      )
+      return
+    }
+
     setSavingTiebreaker(true)
 
     try {
       const tiebreakerId = `${user.uid}_${WEEK_ID}`
 
-      await setDoc(doc(db, 'tiebreakers', tiebreakerId), {
-        userId: user.uid,
-        weekId: WEEK_ID,
-        gameId: tiebreakerGame.id,
-        totalPoints: points,
-        updatedAt: serverTimestamp(),
-      })
+      await setDoc(
+        doc(db, 'tiebreakers', tiebreakerId),
+        {
+          userId: user.uid,
+          weekId: WEEK_ID,
+          gameId: tiebreakerGame.gameId,
+          totalPoints: points,
+          updatedAt: serverTimestamp(),
+        },
+      )
     } catch (error) {
       console.error(error)
-      setSaveError('Your tiebreaker could not be saved. Please try again.')
+      setSaveError(
+        'Your tiebreaker could not be saved. Please try again.',
+      )
     } finally {
       setSavingTiebreaker(false)
     }
   }
 
   if (authLoading) {
-    return <main className="loading-screen">College Pick&apos;em</main>
+    return (
+      <main className="loading-screen">
+        College Pick&apos;em
+      </main>
+    )
   }
 
   if (!user) {
     return <LoginPage />
   }
 
-  if (picksLoading) {
-    return <main className="loading-screen">Loading your picks…</main>
+  if (dataLoading) {
+    return (
+      <main className="loading-screen">
+        Loading Week 1…
+      </main>
+    )
   }
 
-  const page = {
-    home: (
+  const tiebreakerGame =
+    games.find((game) => game.tiebreaker) ?? null
+
+  const tabs = isAdmin
+    ? [
+        ...regularTabs,
+        {
+          id: 'admin' as Tab,
+          label: 'Admin',
+          icon: '🛠',
+        },
+      ]
+    : regularTabs
+
+  let page
+
+  if (activeTab === 'home') {
+    page = (
       <HomePage
         picksMade={Object.keys(picks).length}
         totalGames={games.length}
       />
-    ),
-    picks: (
+    )
+  } else if (activeTab === 'picks') {
+    page = (
       <PicksPage
+        games={games}
+        tiebreakerGame={tiebreakerGame}
         picks={picks}
         onPick={savePick}
         tiebreaker={tiebreaker}
@@ -697,26 +832,60 @@ function App() {
         savingTiebreaker={savingTiebreaker}
         saveError={saveError}
       />
-    ),
-    standings: <PlaceholderPage title="Standings" />,
-    history: <PlaceholderPage title="History" />,
-    settings: <SettingsPage user={user} />,
-  }[activeTab]
+    )
+  } else if (activeTab === 'standings') {
+    page = <PlaceholderPage title="Standings" />
+  } else if (activeTab === 'history') {
+    page = <PlaceholderPage title="History" />
+  } else if (activeTab === 'settings') {
+    page = (
+      <SettingsPage
+        user={user}
+        isAdmin={isAdmin}
+      />
+    )
+  } else if (
+    activeTab === 'admin' &&
+    isAdmin
+  ) {
+    page = <AdminPage />
+  } else {
+    page = (
+      <HomePage
+        picksMade={0}
+        totalGames={games.length}
+      />
+    )
+  }
 
   return (
     <div className="app-shell">
       <main className="app-content">{page}</main>
 
-      <nav className="bottom-nav" aria-label="Primary navigation">
+      <nav
+        className="bottom-nav"
+        aria-label="Primary navigation"
+      >
         {tabs.map((tab) => (
           <button
             key={tab.id}
             type="button"
-            className={activeTab === tab.id ? 'nav-item active' : 'nav-item'}
+            className={
+              activeTab === tab.id
+                ? 'nav-item active'
+                : 'nav-item'
+            }
             onClick={() => setActiveTab(tab.id)}
-            aria-current={activeTab === tab.id ? 'page' : undefined}
+            aria-current={
+              activeTab === tab.id
+                ? 'page'
+                : undefined
+            }
           >
-            <span className="nav-icon" aria-hidden="true">
+            <span
+              className="nav-icon"
+              aria-hidden="true"
+            >
               {tab.icon}
             </span>
             <span>{tab.label}</span>
