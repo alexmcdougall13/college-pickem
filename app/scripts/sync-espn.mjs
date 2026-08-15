@@ -725,40 +725,108 @@ async function updatePublishedGameFromEvent(event) {
   }
 
   const gameId = String(event.id)
-  const ref = db.collection('games').doc(gameId)
-  const existing = await ref.get()
-
-  if (!existing.exists) {
-    return false
-  }
-
   const liveStatus = getLiveStatus(event)
 
-  /*
-   * IMPORTANT:
-   * Only live/result fields are refreshed here.
-   * The published betting line, teams, order, tiebreaker,
-   * and other pool settings are intentionally untouched.
-   */
-  await ref.set(
-    {
-      awayScore: getScore(away),
-      homeScore: getScore(home),
-      status: liveStatus.status,
-      statusState: liveStatus.statusState,
-      period: liveStatus.period,
-      displayClock: liveStatus.displayClock,
-      final: liveStatus.final,
-      scoreUpdatedAt: new Date(),
-    },
-    { merge: true },
-  )
+  const liveFields = {
+    awayScore: getScore(away),
+    homeScore: getScore(home),
+    status: liveStatus.status,
+    statusState: liveStatus.statusState,
+    period: liveStatus.period,
+    displayClock: liveStatus.displayClock,
+    final: liveStatus.final,
+    scoreUpdatedAt: new Date(),
+  }
 
-  return true
+  /*
+   * Keep updating the original global game during migration.
+   * This gives us a backup until the legacy structure is retired.
+   */
+  const legacyRef = db.collection('games').doc(gameId)
+  const legacySnapshot = await legacyRef.get()
+
+  let updated = false
+
+  if (legacySnapshot.exists) {
+    await legacyRef.set(
+      liveFields,
+      { merge: true },
+    )
+
+    updated = true
+  }
+
+  /*
+   * Update every league that has this ESPN game published.
+   *
+   * This is what allows the same game to appear in multiple
+   * independent pools while ESPN only needs to be queried once.
+   */
+  const leagueGamesSnapshot = await db
+    .collectionGroup('games')
+    .where('gameId', '==', gameId)
+    .get()
+
+  const writer = db.bulkWriter()
+
+  for (const gameDocument of leagueGamesSnapshot.docs) {
+    /*
+     * Avoid writing the root legacy copy twice if Firestore
+     * happens to include it in the collection-group query.
+     */
+    if (gameDocument.ref.path === legacyRef.path) {
+      continue
+    }
+
+    writer.set(
+      gameDocument.ref,
+      liveFields,
+      { merge: true },
+    )
+
+    updated = true
+  }
+
+  await writer.close()
+
+  return updated
 }
 
 async function getRelevantPublishedDates() {
-  const snapshot = await db.collection('games').get()
+  /*
+   * Check both the original global games and every league's
+   * published games while we are migrating.
+   */
+  const [
+    legacySnapshot,
+    leagueSnapshot,
+  ] = await Promise.all([
+    db.collection('games').get(),
+    db.collectionGroup('games').get(),
+  ])
+
+  const documentsByPath = new Map()
+
+  for (const document of legacySnapshot.docs) {
+    documentsByPath.set(
+      document.ref.path,
+      document,
+    )
+  }
+
+  for (const document of leagueSnapshot.docs) {
+    documentsByPath.set(
+      document.ref.path,
+      document,
+    )
+  }
+
+  const snapshot = {
+    forEach(callback) {
+      documentsByPath.forEach(callback)
+    },
+  }
+
   const now = Date.now()
 
   /*

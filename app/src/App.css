@@ -404,3 +404,245 @@ button.team-card:active {
   font-size: 0.8rem;
   text-align: center;
 }
+
+/* ===== Light / Dark / System theme support ===== */
+:root {
+  --theme-bg:#f4f7fb; --theme-surface:#fff; --theme-soft:#f8fafc;
+  --theme-text:#172033; --theme-muted:#64748b; --theme-border:#d9e0ea; --theme-accent:#2563eb;
+}
+:root[data-theme='dark'] {
+  --theme-bg:#0b1220; --theme-surface:#111a2b; --theme-soft:#162033;
+  --theme-text:#f1f5f9; --theme-muted:#9aa9bd; --theme-border:#29364a; --theme-accent:#6ea8ff;
+}
+.settings-card{margin-top:18px;padding:18px;border:1px solid var(--theme-border);border-radius:18px;background:var(--theme-surface);text-align:left}
+.settings-card h2{margin:0;font-size:18px}.theme-settings-description{margin:5px 0 14px;color:var(--theme-muted);font-size:13px}
+.theme-options{display:grid;gap:8px}.theme-option{width:100%;display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border:1px solid var(--theme-border);border-radius:12px;background:var(--theme-soft);color:var(--theme-text);text-align:left;cursor:pointer}
+.theme-option strong,.theme-option small{display:block}.theme-option small{margin-top:2px;color:var(--theme-muted);font-size:12px}.theme-option.selected{border:2px solid var(--theme-accent)}
+.theme-radio{width:20px;height:20px;border:2px solid #94a3b8;border-radius:50%;background:var(--theme-surface);box-sizing:border-box}.theme-option.selected .theme-radio{border:6px solid var(--theme-accent)}
+:root[data-theme='dark'] body,:root[data-theme='dark'] #root,:root[data-theme='dark'] .app-shell,:root[data-theme='dark'] .app-main,:root[data-theme='dark'] .login-page{background:var(--theme-bg)!important;color:var(--theme-text)!important}
+:root[data-theme='dark'] h1,:root[data-theme='dark'] h2,:root[data-theme='dark'] h3,:root[data-theme='dark'] strong,:root[data-theme='dark'] .team-name,:root[data-theme='dark'] .team-line,:root[data-theme='dark'] .page-placeholder{color:var(--theme-text)}
+:root[data-theme='dark'] .subtitle,:root[data-theme='dark'] .eyebrow,:root[data-theme='dark'] .team-designation,:root[data-theme='dark'] .save-status{color:var(--theme-muted)}
+:root[data-theme='dark'] .week-card,:root[data-theme='dark'] .game-section,:root[data-theme='dark'] .tiebreaker-section,:root[data-theme='dark'] .login-card,:root[data-theme='dark'] .team-card,:root[data-theme='dark'] .static-card,:root[data-theme='dark'] .settings-card{background:var(--theme-surface)!important;color:var(--theme-text)!important;border-color:var(--theme-border)!important}
+:root[data-theme='dark'] input,:root[data-theme='dark'] select,:root[data-theme='dark'] textarea{background:var(--theme-soft)!important;color:var(--theme-text)!important;border-color:var(--theme-border)!important}
+:root[data-theme='dark'] .bottom-nav{background:#0f1828!important;border-color:var(--theme-border)!important}:root[data-theme='dark'] .nav-button{color:var(--theme-muted)}:root[data-theme='dark'] .nav-button.active{color:var(--theme-accent)}
+:root[data-theme='dark'] table,:root[data-theme='dark'] thead,:root[data-theme='dark'] tbody,:root[data-theme='dark'] tr,:root[data-theme='dark'] th,:root[data-theme='dark'] td{color:var(--theme-text);border-color:var(--theme-border)!important}
+:root[data-theme='dark'] div[style*="background: white"],:root[data-theme='dark'] div[style*="background: #fff"],:root[data-theme='dark'] section[style*="background: #fff"]{background:var(--theme-surface)!important;border-color:var(--theme-border)!important}
+:root[data-theme='dark'] div[style*="background: #f8fafc"]{background:var(--theme-soft)!important}
+:root[data-theme='dark'] [style*="color: #64748b"]{color:var(--theme-muted)!important}:root[data-theme='dark'] [style*="color: #172033"]{color:var(--theme-text)!important}
+
+/* ===== Dark mode readability fixes ===== */
+
+/* General dark-mode text */
+:root[data-theme='dark'] .app-shell,
+:root[data-theme='dark'] .app-content,
+:root[data-theme='dark'] .page-header,
+:root[data-theme='dark'] .app-header,
+:root[data-theme='dark'] .page-placeholder,
+:root[data-theme='dark'] .week-card,
+:root[data-theme='dark'] .game-section,
+:root[data-theme='dark'] .tiebreaker-section,
+:root[data-theme='dark'] .settings-card,
+:root[data-theme='dark'] .admin-page {
+  color: #f1f5f9 !important;
+}
+
+/* Any inline dark text that became unreadable */
+:root[data-theme='dark'] [style*="color: #172033"],
+:root[data-theme='dark'] [style*="color:#172033"],
+:root[data-theme='dark'] [style*="color: rgb(23, 32, 51)"] {
+  color: #f1f5f9 !important;
+}
+
+:root[data-theme='dark'] [style*="color: #475569"],
+:root[data-theme='dark'] [style*="color:#475569"],
+:root[data-theme='dark'] [style*="color: rgb(71, 85, 105)"],
+:root[data-theme='dark'] [style*="color: #64748b"],
+:root[data-theme='dark'] [style*="color:#64748b"],
+:root[data-theme='dark'] [style*="color: rgb(100, 116, 139)"],
+:root[data-theme='dark'] .subtitle,
+:root[data-theme='dark'] .eyebrow,
+:root[data-theme='dark'] .week-label,
+:root[data-theme='dark'] .team-designation,
+:root[data-theme='dark'] .save-status {
+  color: #9fb0c6 !important;
+}
+
+/* Home picks table: force the whole table itself dark rather than leaving white rows */
+:root[data-theme='dark'] .app-content section div[style*="background: #fff"],
+:root[data-theme='dark'] .app-content section div[style*="background:#fff"],
+:root[data-theme='dark'] .app-content section div[style*="background: white"],
+:root[data-theme='dark'] .app-content section[style*="background: #fff"],
+:root[data-theme='dark'] .app-content section[style*="background:#fff"] {
+  background: #111a2b !important;
+  color: #f1f5f9 !important;
+  border-color: #29364a !important;
+}
+
+/* Header/secondary rows inside tables */
+:root[data-theme='dark'] .app-content div[style*="background: #f8fafc"],
+:root[data-theme='dark'] .app-content div[style*="background:#f8fafc"],
+:root[data-theme='dark'] .app-content div[style*="background: rgb(248, 250, 252)"] {
+  background: #162033 !important;
+  color: #f1f5f9 !important;
+}
+
+/* Table/grid borders */
+:root[data-theme='dark'] .app-content [style*="border-left: 1px solid #edf0f5"],
+:root[data-theme='dark'] .app-content [style*="border-bottom: 1px solid #edf0f5"],
+:root[data-theme='dark'] .app-content [style*="border-bottom: 1px solid #e7ebf1"] {
+  border-color: #29364a !important;
+}
+
+/* Keep pick-logo cards readable */
+:root[data-theme='dark'] .app-content [style*="background: #f8fafc"] img,
+:root[data-theme='dark'] .app-content [style*="background:#f8fafc"] img {
+  opacity: 1;
+}
+
+/* Bottom navigation */
+:root[data-theme='dark'] .bottom-nav {
+  background: #0f1828 !important;
+  border-top: 1px solid #29364a !important;
+}
+
+:root[data-theme='dark'] .bottom-nav .nav-item {
+  color: #91a2b8 !important;
+}
+
+:root[data-theme='dark'] .bottom-nav .nav-item .nav-icon,
+:root[data-theme='dark'] .bottom-nav .nav-item span {
+  color: inherit !important;
+  opacity: 1 !important;
+}
+
+:root[data-theme='dark'] .bottom-nav .nav-item.active {
+  color: #ffffff !important;
+  background: #18263b !important;
+  border-color: #7db7ff !important;
+}
+
+:root[data-theme='dark'] .bottom-nav .nav-item.active .nav-icon,
+:root[data-theme='dark'] .bottom-nav .nav-item.active span {
+  color: #ffffff !important;
+}
+
+/* Make inactive icons a little brighter too */
+:root[data-theme='dark'] .bottom-nav .nav-item:not(.active) .nav-icon {
+  color: #a9b8ca !important;
+}
+
+/* Inputs and buttons */
+:root[data-theme='dark'] input,
+:root[data-theme='dark'] select,
+:root[data-theme='dark'] textarea {
+  background: #162033 !important;
+  color: #f1f5f9 !important;
+  border-color: #40506a !important;
+}
+
+:root[data-theme='dark'] input::placeholder {
+  color: #7f90a8 !important;
+}
+
+/* ===== Dark mode body/card background fix ===== */
+
+/* React may serialize inline `background: #fff` as rgb(255, 255, 255).
+   Catch both background and background-color forms. */
+:root[data-theme='dark'] .app-content [style*="background: rgb(255, 255, 255)"],
+:root[data-theme='dark'] .app-content [style*="background-color: rgb(255, 255, 255)"],
+:root[data-theme='dark'] .app-content [style*="background: white"],
+:root[data-theme='dark'] .app-content [style*="background-color: white"],
+:root[data-theme='dark'] .app-content [style*="background: #fff"],
+:root[data-theme='dark'] .app-content [style*="background-color: #fff"],
+:root[data-theme='dark'] .app-content [style*="background: #ffffff"],
+:root[data-theme='dark'] .app-content [style*="background-color: #ffffff"] {
+  background: #111a2b !important;
+  background-color: #111a2b !important;
+  color: #f1f5f9 !important;
+  border-color: #29364a !important;
+}
+
+/* Catch the light gray header/secondary surfaces too. */
+:root[data-theme='dark'] .app-content [style*="background: rgb(248, 250, 252)"],
+:root[data-theme='dark'] .app-content [style*="background-color: rgb(248, 250, 252)"],
+:root[data-theme='dark'] .app-content [style*="background: #f8fafc"],
+:root[data-theme='dark'] .app-content [style*="background-color: #f8fafc"] {
+  background: #162033 !important;
+  background-color: #162033 !important;
+  color: #f1f5f9 !important;
+}
+
+/* Home picks grid: individual rows/cells inherit the dark surface. */
+:root[data-theme='dark'] .app-content .home-picks-board,
+:root[data-theme='dark'] .app-content .standings-board {
+  background: #111a2b !important;
+  color: #f1f5f9 !important;
+}
+
+/* Force transparent row/cell backgrounds so no white block remains. */
+:root[data-theme='dark'] .app-content .home-picks-board > *,
+:root[data-theme='dark'] .app-content .home-picks-board > * > *,
+:root[data-theme='dark'] .app-content .standings-board > *,
+:root[data-theme='dark'] .app-content .standings-board > * > * {
+  border-color: #29364a !important;
+}
+
+/* Generic safety net for the inline grids currently used on Home and Standings. */
+:root[data-theme='dark'] .app-content section[style] > div[style] {
+  color: #f1f5f9;
+}
+
+/* Text within darkened body rows */
+:root[data-theme='dark'] .app-content [style*="text-align: center"],
+:root[data-theme='dark'] .app-content [style*="text-align:center"] {
+  color: inherit;
+}
+
+/* Hidden pick locks should blend into the current theme */
+[title="Hidden until kickoff"] {
+  background: transparent !important;
+  border: none !important;
+}
+
+/* ===== History week selector ===== */
+
+.history-week-button {
+  color: inherit !important;
+  background: transparent !important;
+  border-color: #cbd5e1 !important;
+}
+
+.history-week-button.selected {
+  background: #eff6ff !important;
+  color: #172033 !important;
+  border-color: #2563eb !important;
+}
+
+:root[data-theme='dark'] .history-week-button {
+  background: transparent !important;
+  color: #f1f5f9 !important;
+  border-color: #52647d !important;
+}
+
+:root[data-theme='dark'] .history-week-button.selected {
+  background: #18263b !important;
+  color: #f1f5f9 !important;
+  border-color: #7db7ff !important;
+}
+
+/* ===== Money / balance colors ===== */
+.money-positive {
+  color: #16803a !important;
+}
+
+.money-negative {
+  color: #c73535 !important;
+}
+
+:root[data-theme='dark'] .money-positive {
+  color: #5fd27f !important;
+}
+
+:root[data-theme='dark'] .money-negative {
+  color: #ff7b7b !important;
+}
