@@ -124,6 +124,8 @@ type SeasonWeekData = {
 
 const SEASON = 2026
 const LEGACY_LEAGUE_ID = 'legacy-2026'
+const ESPN_SYNC_WORKFLOW_URL =
+  'https://github.com/alexmcdougall13/college-pickem/actions/workflows/sync-espn.yml'
 
 
 
@@ -2097,6 +2099,8 @@ function AdminPage({
   const [publishing, setPublishing] = useState(false)
   const [startingNextWeek, setStartingNextWeek] = useState(false)
   const [startingPostseason, setStartingPostseason] = useState(false)
+  const [reloadingEspnData, setReloadingEspnData] = useState(false)
+  const [lastEspnLoadAt, setLastEspnLoadAt] = useState<Date | null>(null)
   const [publishMessage, setPublishMessage] = useState('')
   const [error, setError] = useState('')
   const [stake, setStake] = useState(String(currentWeek.stake))
@@ -2105,20 +2109,82 @@ function AdminPage({
   const publishWeekLabel = currentWeek.label
   const isPostseason = currentWeek.competitionType === 'postseason'
 
-  async function loadAvailableGames() {
-    setLoading(true)
+  async function loadAvailableGames({
+    showLoading = true,
+  }: {
+    showLoading?: boolean
+  } = {}) {
+    if (showLoading) {
+      setLoading(true)
+    } else {
+      setReloadingEspnData(true)
+    }
+
     setError('')
 
     try {
-      const snapshot = await getDocs(collection(db, 'availableGames'))
+      const [
+        masterSnapshot,
+        draftSnapshot,
+        publishedSnapshot,
+      ] = await Promise.all([
+        getDocs(collection(db, 'availableGames')),
+        getDocs(
+          collection(
+            db,
+            'leagues',
+            leagueId,
+            'draftSelections',
+          ),
+        ),
+        getDocs(
+          query(
+            collection(db, 'leagues', leagueId, 'games'),
+            where('weekId', '==', publishWeekId),
+          ),
+        ),
+      ])
 
-      const loadedGames: AvailableGame[] = snapshot.docs
+      const publishedByGameId = new Map<
+        string,
+        { selected: boolean; tiebreaker: boolean }
+      >()
+
+      publishedSnapshot.forEach((gameDocument) => {
+        const data = gameDocument.data()
+        const gameId = String(data.gameId ?? gameDocument.id)
+
+        publishedByGameId.set(gameId, {
+          selected: data.selected === true,
+          tiebreaker: data.tiebreaker === true,
+        })
+      })
+
+      const draftByGameId = new Map<
+        string,
+        { selected: boolean; tiebreaker: boolean }
+      >()
+
+      draftSnapshot.forEach((draftDocument) => {
+        const data = draftDocument.data()
+        const gameId = String(data.gameId ?? draftDocument.id)
+
+        draftByGameId.set(gameId, {
+          selected: data.selected === true,
+          tiebreaker: data.tiebreaker === true,
+        })
+      })
+
+      const loadedGames: AvailableGame[] = masterSnapshot.docs
         .map((gameDocument) => {
           const data = gameDocument.data()
+          const gameId = String(data.gameId ?? gameDocument.id)
+          const draft = draftByGameId.get(gameId)
+          const published = publishedByGameId.get(gameId)
 
           return {
             id: gameDocument.id,
-            gameId: String(data.gameId ?? gameDocument.id),
+            gameId,
             gameName: String(data.gameName ?? ''),
             kickoff: String(data.kickoff ?? ''),
             awayTeamName: String(data.awayTeamName ?? 'Away'),
@@ -2141,8 +2207,14 @@ function AdminPage({
               typeof data.ratingRank === 'number'
                 ? data.ratingRank
                 : 9999,
-            selected: data.selected === true,
-            tiebreaker: data.tiebreaker === true,
+            selected:
+              draft != null
+                ? draft.selected
+                : published?.selected === true,
+            tiebreaker:
+              draft != null
+                ? draft.tiebreaker
+                : published?.tiebreaker === true,
           }
         })
         .sort((a, b) => {
@@ -2154,17 +2226,29 @@ function AdminPage({
         })
 
       setAvailableGames(loadedGames)
+      setLastEspnLoadAt(new Date())
     } catch (loadError) {
       console.error(loadError)
       setError('Unable to load available games.')
     } finally {
       setLoading(false)
+      setReloadingEspnData(false)
     }
   }
 
   useEffect(() => {
     loadAvailableGames()
-  }, [])
+
+    const handleWindowFocus = () => {
+      loadAvailableGames({ showLoading: false })
+    }
+
+    window.addEventListener('focus', handleWindowFocus)
+
+    return () => {
+      window.removeEventListener('focus', handleWindowFocus)
+    }
+  }, [leagueId, currentWeek.weekId])
 
   useEffect(() => {
     setStake(String(currentWeek.stake))
@@ -2172,6 +2256,14 @@ function AdminPage({
 
   async function toggleSelection(game: AvailableGame) {
     const nextSelected = !game.selected
+
+    if (
+      isGameLocked(game.kickoff) &&
+      !game.selected
+    ) {
+      setError('A game that has already kicked off cannot be newly selected.')
+      return
+    }
 
     setSavingId(game.id)
     setError('')
@@ -2190,17 +2282,26 @@ function AdminPage({
 
     try {
       await setDoc(
-        doc(db, 'availableGames', game.id),
+        doc(
+          db,
+          'leagues',
+          leagueId,
+          'draftSelections',
+          game.gameId,
+        ),
         {
+          gameId: game.gameId,
+          weekId: publishWeekId,
           selected: nextSelected,
-          ...(nextSelected ? {} : { tiebreaker: false }),
+          tiebreaker: nextSelected ? game.tiebreaker : false,
+          updatedAt: serverTimestamp(),
         },
         { merge: true },
       )
     } catch (saveError) {
       console.error(saveError)
       setError('Unable to save the game selection.')
-      await loadAvailableGames()
+      await loadAvailableGames({ showLoading: false })
     } finally {
       setSavingId(null)
     }
@@ -2208,6 +2309,11 @@ function AdminPage({
 
   async function toggleTiebreaker(game: AvailableGame) {
     if (!game.selected) return
+
+    if (isGameLocked(game.kickoff)) {
+      setError('The tiebreaker cannot be changed after that game kicks off.')
+      return
+    }
 
     const nextTiebreaker = !game.tiebreaker
 
@@ -2230,16 +2336,40 @@ function AdminPage({
       for (const item of previousGames) {
         if (item.tiebreaker && item.id !== game.id) {
           batch.set(
-            doc(db, 'availableGames', item.id),
-            { tiebreaker: false },
+            doc(
+              db,
+              'leagues',
+              leagueId,
+              'draftSelections',
+              item.gameId,
+            ),
+            {
+              gameId: item.gameId,
+              weekId: publishWeekId,
+              selected: item.selected,
+              tiebreaker: false,
+              updatedAt: serverTimestamp(),
+            },
             { merge: true },
           )
         }
       }
 
       batch.set(
-        doc(db, 'availableGames', game.id),
-        { tiebreaker: nextTiebreaker },
+        doc(
+          db,
+          'leagues',
+          leagueId,
+          'draftSelections',
+          game.gameId,
+        ),
+        {
+          gameId: game.gameId,
+          weekId: publishWeekId,
+          selected: true,
+          tiebreaker: nextTiebreaker,
+          updatedAt: serverTimestamp(),
+        },
         { merge: true },
       )
 
@@ -2247,10 +2377,18 @@ function AdminPage({
     } catch (saveError) {
       console.error(saveError)
       setError('Unable to save the tiebreaker selection.')
-      await loadAvailableGames()
+      await loadAvailableGames({ showLoading: false })
     } finally {
       setSavingId(null)
     }
+  }
+
+  function openEspnRefresh() {
+    window.open(
+      ESPN_SYNC_WORKFLOW_URL,
+      '_blank',
+      'noopener,noreferrer',
+    )
   }
 
   async function startNextWeek() {
@@ -2303,18 +2441,12 @@ function AdminPage({
 
   async function publishWeek() {
     const selectedGames = availableGames.filter((game) => game.selected)
-    const selectedTiebreakers = selectedGames.filter((game) => game.tiebreaker)
 
     setError('')
     setPublishMessage('')
 
     if (selectedGames.length === 0) {
       setError('Select at least one game before publishing.')
-      return
-    }
-
-    if (selectedTiebreakers.length !== 1) {
-      setError('Select exactly one tiebreaker game before publishing.')
       return
     }
 
@@ -2325,24 +2457,14 @@ function AdminPage({
       return
     }
 
-    const tiebreakerGameId = selectedTiebreakers[0].gameId
-
-    const orderedGames = [...selectedGames].sort((a, b) => {
-      const kickoffDifference =
-        new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime()
-
-      if (kickoffDifference !== 0) {
-        return kickoffDifference
-      }
-
-      return b.rating - a.rating
-    })
+    if (currentWeekIsFinal) {
+      setError('A final week cannot be republished.')
+      return
+    }
 
     setPublishing(true)
 
     try {
-      const batch = writeBatch(db)
-
       const existingGamesQuery = query(
         collection(db, 'leagues', leagueId, 'games'),
         where('weekId', '==', publishWeekId),
@@ -2350,60 +2472,221 @@ function AdminPage({
 
       const existingGamesSnapshot = await getDocs(existingGamesQuery)
 
-      for (const existingGame of existingGamesSnapshot.docs) {
-        batch.delete(existingGame.ref)
+      const existingOrderByGameId = new Map<string, number>()
+
+      existingGamesSnapshot.docs.forEach((gameDocument) => {
+        const data = gameDocument.data()
+        const gameId = String(data.gameId ?? gameDocument.id)
+
+        existingOrderByGameId.set(
+          gameId,
+          typeof data.order === 'number'
+            ? data.order
+            : 9999,
+        )
+      })
+
+      const lockedExistingGames = existingGamesSnapshot.docs.filter(
+        (gameDocument) => {
+          const data = gameDocument.data()
+          const kickoff =
+            typeof data.kickoff === 'string'
+              ? data.kickoff
+              : ''
+
+          return kickoff ? isGameLocked(kickoff) : false
+        },
+      )
+
+      const lockedExistingIds = new Set(
+        lockedExistingGames.map((gameDocument) =>
+          String(gameDocument.data().gameId ?? gameDocument.id),
+        ),
+      )
+
+      const newlySelectedLockedGame = selectedGames.find(
+        (game) =>
+          isGameLocked(game.kickoff) &&
+          !lockedExistingIds.has(game.gameId),
+      )
+
+      if (newlySelectedLockedGame) {
+        setError(
+          `${newlySelectedLockedGame.awayTeamName} at ${newlySelectedLockedGame.homeTeamName} has already kicked off and cannot be added.`,
+        )
+        return
       }
 
-      for (let index = 0; index < orderedGames.length; index += 1) {
-        const game = orderedGames[index]
-        const sourceSnapshot = await getDoc(doc(db, 'availableGames', game.id))
+      const lockedTiebreaker = lockedExistingGames.find(
+        (gameDocument) => gameDocument.data().tiebreaker === true,
+      )
+
+      const selectedTiebreakers = selectedGames.filter(
+        (game) => game.tiebreaker,
+      )
+
+      let tiebreakerGameId = ''
+
+      if (lockedTiebreaker) {
+        tiebreakerGameId = String(
+          lockedTiebreaker.data().gameId ?? lockedTiebreaker.id,
+        )
+
+        const conflictingTiebreaker = selectedTiebreakers.find(
+          (game) => game.gameId !== tiebreakerGameId,
+        )
+
+        if (conflictingTiebreaker) {
+          setError(
+            'The published tiebreaker has already kicked off and cannot be changed.',
+          )
+          return
+        }
+      } else {
+        if (selectedTiebreakers.length !== 1) {
+          setError('Select exactly one tiebreaker game before publishing.')
+          return
+        }
+
+        tiebreakerGameId = selectedTiebreakers[0].gameId
+      }
+
+      if (currentWeek.published) {
+        const confirmed = window.confirm(
+          `Republish ${publishWeekLabel}? Latest ESPN lines will become the official betting lines for every game that has not kicked off. Existing picks will remain saved, and games that already started will not change.`,
+        )
+
+        if (!confirmed) {
+          return
+        }
+      }
+
+      const selectedUnlockedGames = selectedGames.filter(
+        (game) => !isGameLocked(game.kickoff),
+      )
+
+      const orderedSelectedUnlocked = [...selectedUnlockedGames].sort(
+        (a, b) => {
+          const kickoffDifference =
+            new Date(a.kickoff).getTime() -
+            new Date(b.kickoff).getTime()
+
+          if (kickoffDifference !== 0) {
+            return kickoffDifference
+          }
+
+          return b.rating - a.rating
+        },
+      )
+
+      const lockedGamesInOrder = [...lockedExistingGames].sort(
+        (a, b) => {
+          const aOrder =
+            typeof a.data().order === 'number'
+              ? a.data().order
+              : 9999
+          const bOrder =
+            typeof b.data().order === 'number'
+              ? b.data().order
+              : 9999
+
+          return aOrder - bOrder
+        },
+      )
+
+      const finalGameIds = new Set<string>()
+
+      lockedGamesInOrder.forEach((gameDocument) => {
+        finalGameIds.add(
+          String(gameDocument.data().gameId ?? gameDocument.id),
+        )
+      })
+
+      orderedSelectedUnlocked.forEach((game) => {
+        finalGameIds.add(game.gameId)
+      })
+
+      const batch = writeBatch(db)
+
+      for (const existingGame of existingGamesSnapshot.docs) {
+        const gameId = String(
+          existingGame.data().gameId ?? existingGame.id,
+        )
+
+        if (
+          !lockedExistingIds.has(gameId) &&
+          !finalGameIds.has(gameId)
+        ) {
+          batch.delete(existingGame.ref)
+        }
+      }
+
+      let nextOrder = lockedGamesInOrder.length + 1
+
+      for (const game of orderedSelectedUnlocked) {
+        const sourceSnapshot = await getDoc(
+          doc(db, 'availableGames', game.id),
+        )
         const source = sourceSnapshot.data()
 
         if (!source) {
           throw new Error(`Missing available game ${game.id}`)
         }
 
-        batch.set(doc(db, 'leagues', leagueId, 'games', game.gameId), {
-          weekId: publishWeekId,
-          gameId: game.gameId,
-          gameName: source.gameName || '',
-          kickoff: source.kickoff,
-          kickoffTimestamp: Timestamp.fromDate(new Date(source.kickoff)),
-          selected: true,
-          tiebreaker: game.gameId === tiebreakerGameId,
-          order: index + 1,
+        batch.set(
+          doc(db, 'leagues', leagueId, 'games', game.gameId),
+          {
+            weekId: publishWeekId,
+            gameId: game.gameId,
+            gameName: source.gameName || '',
+            kickoff: source.kickoff,
+            kickoffTimestamp: Timestamp.fromDate(
+              new Date(source.kickoff),
+            ),
+            selected: true,
+            tiebreaker: game.gameId === tiebreakerGameId,
+            order:
+              existingOrderByGameId.get(game.gameId) ?? nextOrder,
 
-          awayTeamId: source.awayTeamId,
-          awayTeamName: source.awayTeamName,
-          awayTeamRank: source.awayTeamRank ?? null,
-          awayTeamLogo: source.awayTeamLogo || '',
-          awayTeamLine:
-            typeof source.homeTeamLine === 'number'
-              ? -source.homeTeamLine
-              : 0,
+            awayTeamId: source.awayTeamId,
+            awayTeamName: source.awayTeamName,
+            awayTeamRank: source.awayTeamRank ?? null,
+            awayTeamLogo: source.awayTeamLogo || '',
+            awayTeamLine:
+              typeof source.homeTeamLine === 'number'
+                ? -source.homeTeamLine
+                : 0,
 
-          homeTeamId: source.homeTeamId,
-          homeTeamName: source.homeTeamName,
-          homeTeamRank: source.homeTeamRank ?? null,
-          homeTeamLogo: source.homeTeamLogo || '',
-          homeTeamLine:
-            typeof source.homeTeamLine === 'number'
-              ? source.homeTeamLine
-              : 0,
+            homeTeamId: source.homeTeamId,
+            homeTeamName: source.homeTeamName,
+            homeTeamRank: source.homeTeamRank ?? null,
+            homeTeamLogo: source.homeTeamLogo || '',
+            homeTeamLine:
+              typeof source.homeTeamLine === 'number'
+                ? source.homeTeamLine
+                : 0,
 
-          rating: source.rating ?? 0,
-          ratingRank: source.ratingRank ?? null,
-          final: source.final === true,
-          winnerTeamId:
-            typeof source.winnerTeamId === 'string'
-              ? source.winnerTeamId
-              : null,
-          awayScore:
-            typeof source.awayScore === 'number' ? source.awayScore : null,
-          homeScore:
-            typeof source.homeScore === 'number' ? source.homeScore : null,
-          publishedAt: serverTimestamp(),
-        })
+            rating: source.rating ?? 0,
+            ratingRank: source.ratingRank ?? null,
+            final: source.final === true,
+            winnerTeamId:
+              typeof source.winnerTeamId === 'string'
+                ? source.winnerTeamId
+                : null,
+            awayScore:
+              typeof source.awayScore === 'number'
+                ? source.awayScore
+                : null,
+            homeScore:
+              typeof source.homeScore === 'number'
+                ? source.homeScore
+                : null,
+            publishedAt: serverTimestamp(),
+          },
+          { merge: true },
+        )
+
+        nextOrder += 1
       }
 
       batch.set(
@@ -2416,9 +2699,12 @@ function AdminPage({
           status: 'open',
           competitionType: currentWeek.competitionType,
           tiebreakerGameId,
-          gameCount: orderedGames.length,
+          gameCount: finalGameIds.size,
           published: true,
           publishedAt: serverTimestamp(),
+          ...(currentWeek.published
+            ? { republishedAt: serverTimestamp() }
+            : {}),
         },
         { merge: true },
       )
@@ -2427,11 +2713,17 @@ function AdminPage({
       await onPublished()
 
       setPublishMessage(
-        `${publishWeekLabel} published with ${orderedGames.length} games at $${stakeAmount} per player.`,
+        currentWeek.published
+          ? `${publishWeekLabel} republished. Latest ESPN lines are now official for games that have not kicked off; existing picks were preserved.`
+          : `${publishWeekLabel} published with ${finalGameIds.size} games at $${stakeAmount} per player.`,
       )
     } catch (publishError) {
       console.error(publishError)
-      setError(`Unable to publish ${publishWeekLabel}.`)
+      setError(
+        currentWeek.published
+          ? `Unable to republish ${publishWeekLabel}.`
+          : `Unable to publish ${publishWeekLabel}.`,
+      )
     } finally {
       setPublishing(false)
     }
@@ -2449,6 +2741,90 @@ function AdminPage({
         </p>
         {error && <p className="login-error">{error}</p>}
       </header>
+
+      <section
+        className="week-card"
+        style={{ marginBottom: 16 }}
+      >
+        <p className="week-label">ESPN Data</p>
+        <h2 style={{ marginBottom: 8 }}>Refresh Lines & Schedule</h2>
+
+        <p
+          style={{
+            margin: '0 0 12px',
+            color: 'var(--theme-muted, #64748b)',
+            fontSize: 12,
+            lineHeight: 1.45,
+          }}
+        >
+          ESPN data is shared across leagues, but each league&apos;s
+          selections and published betting lines are independent.
+          Published lines stay frozen until you explicitly republish.
+        </p>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 10,
+          }}
+        >
+          <button
+            type="button"
+            onClick={openEspnRefresh}
+            disabled={publishing || savingId !== null}
+            style={{
+              padding: '11px 10px',
+              border: '1px solid #cbd5e1',
+              borderRadius: 10,
+              background: 'transparent',
+              color: 'inherit',
+              font: 'inherit',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            Refresh ESPN Data
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              loadAvailableGames({ showLoading: false })
+            }
+            disabled={reloadingEspnData || publishing}
+            style={{
+              padding: '11px 10px',
+              border: '1px solid #cbd5e1',
+              borderRadius: 10,
+              background: 'transparent',
+              color: 'inherit',
+              font: 'inherit',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            {reloadingEspnData ? 'Reloading…' : 'Reload Latest Data'}
+          </button>
+        </div>
+
+        <p
+          style={{
+            margin: '9px 0 0',
+            color: 'var(--theme-muted, #64748b)',
+            fontSize: 11,
+          }}
+        >
+          {lastEspnLoadAt
+            ? `Admin list loaded ${lastEspnLoadAt.toLocaleTimeString([], {
+                hour: 'numeric',
+                minute: '2-digit',
+              })}.`
+            : 'Admin list has not been loaded yet.'}
+          {' '}The refresh button opens the secure GitHub Action; when
+          you return to this tab, the list reloads automatically.
+        </p>
+      </section>
 
       {!loading && availableGames.length > 0 && (
         <section className="week-card">
@@ -2538,7 +2914,13 @@ function AdminPage({
             disabled={publishing || savingId !== null}
             style={{ marginTop: 16 }}
           >
-            {publishing ? 'Publishing…' : `Publish ${publishWeekLabel}`}
+            {publishing
+              ? currentWeek.published
+                ? 'Republishing…'
+                : 'Publishing…'
+              : currentWeek.published
+                ? `Republish ${publishWeekLabel} · Update Lines`
+                : `Publish ${publishWeekLabel}`}
           </button>
 
           {publishMessage && (
@@ -3660,16 +4042,24 @@ function App() {
     loadUserData()
   }, [user, gamesRefreshKey])
 
-  async function clearAvailableGameSelections() {
-    const availableSnapshot = await getDocs(collection(db, 'availableGames'))
+  async function clearLeagueDraftSelections(leagueId: string) {
+    const draftSnapshot = await getDocs(
+      collection(
+        db,
+        'leagues',
+        leagueId,
+        'draftSelections',
+      ),
+    )
+
+    if (draftSnapshot.empty) {
+      return
+    }
+
     const batch = writeBatch(db)
 
-    availableSnapshot.docs.forEach((gameDocument) => {
-      batch.set(
-        gameDocument.ref,
-        { selected: false, tiebreaker: false },
-        { merge: true },
-      )
+    draftSnapshot.docs.forEach((draftDocument) => {
+      batch.delete(draftDocument.ref)
     })
 
     await batch.commit()
@@ -3722,7 +4112,7 @@ function App() {
       { merge: true },
     )
 
-    await clearAvailableGameSelections()
+    await clearLeagueDraftSelections(activeLeague?.id ?? LEGACY_LEAGUE_ID)
 
     setCurrentWeek(nextWeek)
     setSeasonWeeks((current) => [
@@ -3799,7 +4189,7 @@ function App() {
       { merge: true },
     )
 
-    await clearAvailableGameSelections()
+    await clearLeagueDraftSelections(activeLeague?.id ?? LEGACY_LEAGUE_ID)
 
     setCurrentWeek(postseason)
     setSeasonWeeks((current) => [
