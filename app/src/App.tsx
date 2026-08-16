@@ -8,6 +8,7 @@ import {
   type User,
 } from 'firebase/auth'
 import {
+  arrayUnion,
   collection,
   doc,
   getDoc,
@@ -143,6 +144,29 @@ const DEFAULT_WEEK: Week = {
   tiebreakerGameId: '',
   gameCount: 0,
   published: false,
+}
+
+const JOIN_CODE_CHARACTERS =
+  'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+
+function makeJoinCode() {
+  let code = ''
+
+  for (
+    let index = 0;
+    index < 6;
+    index += 1
+  ) {
+    code +=
+      JOIN_CODE_CHARACTERS[
+        Math.floor(
+          Math.random() *
+            JOIN_CODE_CHARACTERS.length,
+        )
+      ]
+  }
+
+  return code
 }
 
 const regularTabs: { id: Tab; label: string; icon: string }[] = [
@@ -3380,29 +3404,151 @@ function AdminPage({
 function SettingsPage({
   user,
   isAdmin,
-  leagueName,
+  activeLeague,
+  availableLeagues,
   themePreference,
   onThemePreferenceChange,
+  onCreateLeague,
+  onJoinLeague,
+  onSwitchLeague,
 }: {
   user: User
   isAdmin: boolean
-  leagueName: string
+  activeLeague: League
+  availableLeagues: League[]
   themePreference: ThemePreference
   onThemePreferenceChange: (theme: ThemePreference) => void
+  onCreateLeague: (leagueName: string) => Promise<League>
+  onJoinLeague: (joinCode: string) => Promise<League>
+  onSwitchLeague: (leagueId: string) => void
 }) {
+  const [newLeagueName, setNewLeagueName] = useState('')
+  const [joinCode, setJoinCode] = useState('')
+  const [leagueAction, setLeagueAction] =
+    useState<'create' | 'join' | null>(null)
+  const [leagueMessage, setLeagueMessage] = useState('')
+  const [leagueError, setLeagueError] = useState('')
+
   async function handleSignOut() {
     await signOut(auth)
   }
 
-  const options: { value: ThemePreference; label: string; description: string }[] = [
-    { value: 'light', label: 'Light', description: 'Always use light mode' },
-    { value: 'dark', label: 'Dark', description: 'Always use dark mode' },
-    { value: 'system', label: 'System', description: 'Match this device' },
+  async function handleCreateLeague(
+    event: React.FormEvent,
+  ) {
+    event.preventDefault()
+
+    const leagueName =
+      newLeagueName.trim()
+
+    if (!leagueName) {
+      setLeagueError('Enter a league name.')
+      return
+    }
+
+    setLeagueAction('create')
+    setLeagueError('')
+    setLeagueMessage('')
+
+    try {
+      const league =
+        await onCreateLeague(
+          leagueName,
+        )
+
+      setNewLeagueName('')
+      setLeagueMessage(
+        `${league.name} created. Join code: ${league.joinCode}`,
+      )
+    } catch (error) {
+      console.error(error)
+
+      setLeagueError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to create the league.',
+      )
+    } finally {
+      setLeagueAction(null)
+    }
+  }
+
+  async function handleJoinLeague(
+    event: React.FormEvent,
+  ) {
+    event.preventDefault()
+
+    const normalizedCode =
+      joinCode
+        .trim()
+        .toUpperCase()
+
+    if (
+      normalizedCode.length !== 6
+    ) {
+      setLeagueError(
+        'Enter the 6-character join code.',
+      )
+      return
+    }
+
+    setLeagueAction('join')
+    setLeagueError('')
+    setLeagueMessage('')
+
+    try {
+      const league =
+        await onJoinLeague(
+          normalizedCode,
+        )
+
+      setJoinCode('')
+      setLeagueMessage(
+        `Joined ${league.name}.`,
+      )
+    } catch (error) {
+      console.error(error)
+
+      setLeagueError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to join the league.',
+      )
+    } finally {
+      setLeagueAction(null)
+    }
+  }
+
+  const options: {
+    value: ThemePreference
+    label: string
+    description: string
+  }[] = [
+    {
+      value: 'light',
+      label: 'Light',
+      description:
+        'Always use light mode',
+    },
+    {
+      value: 'dark',
+      label: 'Dark',
+      description:
+        'Always use dark mode',
+    },
+    {
+      value: 'system',
+      label: 'System',
+      description:
+        'Match this device',
+    },
   ]
 
   return (
     <section className="page-placeholder">
-      <p className="eyebrow">College Pick&apos;em</p>
+      <p className="eyebrow">
+        College Pick&apos;em
+      </p>
       <h1>Settings</h1>
 
       <div className="settings-card theme-settings-card">
@@ -3410,35 +3556,492 @@ function SettingsPage({
         <p className="theme-settings-description">
           Choose how College Pick&apos;em looks on this device.
         </p>
+
         <div className="theme-options">
           {options.map((option) => (
             <button
               key={option.value}
               type="button"
-              className={themePreference === option.value ? 'theme-option selected' : 'theme-option'}
-              onClick={() => onThemePreferenceChange(option.value)}
-              aria-pressed={themePreference === option.value}
+              className={
+                themePreference === option.value
+                  ? 'theme-option selected'
+                  : 'theme-option'
+              }
+              onClick={() =>
+                onThemePreferenceChange(
+                  option.value,
+                )
+              }
+              aria-pressed={
+                themePreference ===
+                option.value
+              }
             >
               <span>
-                <strong>{option.label}</strong>
-                <small>{option.description}</small>
+                <strong>
+                  {option.label}
+                </strong>
+                <small>
+                  {option.description}
+                </small>
               </span>
-              <span className="theme-radio" aria-hidden="true" />
+
+              <span
+                className="theme-radio"
+                aria-hidden="true"
+              />
             </button>
           ))}
         </div>
       </div>
 
       <div className="settings-card account-settings-card">
+        <h2>Leagues</h2>
+
+        <label
+          style={{
+            display: 'block',
+            marginTop: 12,
+            fontWeight: 800,
+          }}
+        >
+          <span
+            style={{
+              display: 'block',
+              marginBottom: 6,
+              fontSize: 12,
+            }}
+          >
+            Active league
+          </span>
+
+          <select
+            value={activeLeague.id}
+            onChange={(event) =>
+              onSwitchLeague(
+                event.target.value,
+              )
+            }
+            style={{
+              width: '100%',
+              padding: '11px 12px',
+              border:
+                '1px solid #cbd5e1',
+              borderRadius: 10,
+              background:
+                'var(--theme-card, #fff)',
+              color: 'inherit',
+              font: 'inherit',
+            }}
+          >
+            {availableLeagues.map(
+              (league) => (
+                <option
+                  key={league.id}
+                  value={league.id}
+                >
+                  {league.name}
+                </option>
+              ),
+            )}
+          </select>
+        </label>
+
+        {isAdmin &&
+          activeLeague.joinCode && (
+            <div
+              style={{
+                marginTop: 14,
+                padding: 12,
+                border:
+                  '1px solid #d9e0ea',
+                borderRadius: 10,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 800,
+                  textTransform:
+                    'uppercase',
+                  letterSpacing:
+                    '.04em',
+                  color:
+                    'var(--theme-muted, #64748b)',
+                }}
+              >
+                Join code
+              </div>
+
+              <div
+                style={{
+                  marginTop: 4,
+                  fontSize: 22,
+                  fontWeight: 900,
+                  letterSpacing:
+                    '.12em',
+                }}
+              >
+                {activeLeague.joinCode}
+              </div>
+            </div>
+          )}
+
+        <form
+          onSubmit={handleCreateLeague}
+          style={{
+            marginTop: 20,
+          }}
+        >
+          <h3
+            style={{
+              marginBottom: 8,
+            }}
+          >
+            Create a league
+          </h3>
+
+          <input
+            type="text"
+            value={newLeagueName}
+            onChange={(event) =>
+              setNewLeagueName(
+                event.target.value,
+              )
+            }
+            placeholder="League name"
+            maxLength={50}
+            disabled={
+              leagueAction !== null
+            }
+            style={{
+              width: '100%',
+              boxSizing:
+                'border-box',
+              padding: '11px 12px',
+              border:
+                '1px solid #cbd5e1',
+              borderRadius: 10,
+              font: 'inherit',
+            }}
+          />
+
+          <button
+            type="submit"
+            disabled={
+              leagueAction !== null
+            }
+            style={{
+              width: '100%',
+              marginTop: 9,
+              padding: '11px 12px',
+              border: 0,
+              borderRadius: 10,
+              font: 'inherit',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            {leagueAction ===
+            'create'
+              ? 'Creating…'
+              : 'Create League'}
+          </button>
+        </form>
+
+        <form
+          onSubmit={handleJoinLeague}
+          style={{
+            marginTop: 22,
+          }}
+        >
+          <h3
+            style={{
+              marginBottom: 8,
+            }}
+          >
+            Join a league
+          </h3>
+
+          <input
+            type="text"
+            value={joinCode}
+            onChange={(event) =>
+              setJoinCode(
+                event.target.value
+                  .toUpperCase()
+                  .replace(
+                    /[^A-Z0-9]/g,
+                    '',
+                  )
+                  .slice(0, 6),
+              )
+            }
+            placeholder="6-character code"
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck={false}
+            disabled={
+              leagueAction !== null
+            }
+            style={{
+              width: '100%',
+              boxSizing:
+                'border-box',
+              padding: '11px 12px',
+              border:
+                '1px solid #cbd5e1',
+              borderRadius: 10,
+              font: 'inherit',
+              textTransform:
+                'uppercase',
+              letterSpacing:
+                '.08em',
+            }}
+          />
+
+          <button
+            type="submit"
+            disabled={
+              leagueAction !== null
+            }
+            style={{
+              width: '100%',
+              marginTop: 9,
+              padding: '11px 12px',
+              border:
+                '1px solid #cbd5e1',
+              borderRadius: 10,
+              background:
+                'transparent',
+              color: 'inherit',
+              font: 'inherit',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            {leagueAction ===
+            'join'
+              ? 'Joining…'
+              : 'Join League'}
+          </button>
+        </form>
+
+        {leagueMessage && (
+          <p
+            style={{
+              marginTop: 14,
+              fontWeight: 800,
+            }}
+          >
+            {leagueMessage}
+          </p>
+        )}
+
+        {leagueError && (
+          <p className="login-error">
+            {leagueError}
+          </p>
+        )}
+      </div>
+
+      <div className="settings-card account-settings-card">
         <h2>Account</h2>
-        <p>Signed in as {user.email}</p>
-        <p>League: {leagueName}</p>
-        <p>{isAdmin ? 'League administrator' : 'League player'}</p>
-        <button type="button" className="settings-signout" onClick={handleSignOut}>
+        <p>
+          Signed in as {user.email}
+        </p>
+        <p>
+          League: {activeLeague.name}
+        </p>
+        <p>
+          {isAdmin
+            ? 'League administrator'
+            : 'League player'}
+        </p>
+
+        <button
+          type="button"
+          className="settings-signout"
+          onClick={handleSignOut}
+        >
           Sign Out
         </button>
       </div>
     </section>
+  )
+}
+
+function LeagueSetupPage({
+  onCreateLeague,
+  onJoinLeague,
+}: {
+  onCreateLeague: (leagueName: string) => Promise<League>
+  onJoinLeague: (joinCode: string) => Promise<League>
+}) {
+  const [leagueName, setLeagueName] = useState('')
+  const [joinCode, setJoinCode] = useState('')
+  const [action, setAction] =
+    useState<'create' | 'join' | null>(null)
+  const [error, setError] = useState('')
+
+  async function create(
+    event: React.FormEvent,
+  ) {
+    event.preventDefault()
+    setError('')
+    setAction('create')
+
+    try {
+      await onCreateLeague(
+        leagueName,
+      )
+    } catch (createError) {
+      console.error(createError)
+
+      setError(
+        createError instanceof Error
+          ? createError.message
+          : 'Unable to create the league.',
+      )
+    } finally {
+      setAction(null)
+    }
+  }
+
+  async function join(
+    event: React.FormEvent,
+  ) {
+    event.preventDefault()
+    setError('')
+    setAction('join')
+
+    try {
+      await onJoinLeague(
+        joinCode,
+      )
+    } catch (joinError) {
+      console.error(joinError)
+
+      setError(
+        joinError instanceof Error
+          ? joinError.message
+          : 'Unable to join the league.',
+      )
+    } finally {
+      setAction(null)
+    }
+  }
+
+  return (
+    <main className="login-page">
+      <div className="login-card">
+        <p className="eyebrow">
+          2026 Season
+        </p>
+
+        <h1>
+          College Pick&apos;em
+        </h1>
+
+        <p className="subtitle">
+          Create a league or join one with a 6-character code.
+        </p>
+
+        <form
+          className="login-form"
+          onSubmit={create}
+        >
+          <label>
+            <span>
+              New League Name
+            </span>
+
+            <input
+              type="text"
+              value={leagueName}
+              onChange={(event) =>
+                setLeagueName(
+                  event.target.value,
+                )
+              }
+              maxLength={50}
+              required
+            />
+          </label>
+
+          <button
+            type="submit"
+            disabled={
+              action !== null
+            }
+          >
+            {action === 'create'
+              ? 'Creating…'
+              : 'Create League'}
+          </button>
+        </form>
+
+        <div
+          style={{
+            margin: '22px 0',
+            textAlign: 'center',
+            color: '#64748b',
+            fontWeight: 800,
+          }}
+        >
+          or
+        </div>
+
+        <form
+          className="login-form"
+          onSubmit={join}
+        >
+          <label>
+            <span>
+              Join Code
+            </span>
+
+            <input
+              type="text"
+              value={joinCode}
+              onChange={(event) =>
+                setJoinCode(
+                  event.target.value
+                    .toUpperCase()
+                    .replace(
+                      /[^A-Z0-9]/g,
+                      '',
+                    )
+                    .slice(0, 6),
+                )
+              }
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              maxLength={6}
+              required
+            />
+          </label>
+
+          <button
+            type="submit"
+            disabled={
+              action !== null
+            }
+          >
+            {action === 'join'
+              ? 'Joining…'
+              : 'Join League'}
+          </button>
+        </form>
+
+        {error && (
+          <p className="login-error">
+            {error}
+          </p>
+        )}
+      </div>
+    </main>
   )
 }
 
@@ -3657,6 +4260,7 @@ function App() {
   const [currentWeek, setCurrentWeek] = useState<Week>(DEFAULT_WEEK)
   const [seasonWeeks, setSeasonWeeks] = useState<SeasonWeekData[]>([])
   const [gamesRefreshKey, setGamesRefreshKey] = useState(0)
+  const [leaguesRefreshKey, setLeaguesRefreshKey] = useState(0)
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
@@ -3791,9 +4395,9 @@ function App() {
         if (cancelled) return
 
         if (memberships.length === 0) {
-          throw new Error(
-            'No league memberships were found for your account.',
-          )
+          setAvailableLeagues([])
+          setActiveLeague(null)
+          return
         }
 
         const leagues = memberships
@@ -3839,7 +4443,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [user])
+  }, [user, leaguesRefreshKey])
 
   useEffect(() => {
     if (!user || !activeLeague) {
@@ -4091,21 +4695,56 @@ function App() {
 
         setHomePicks(loadedHomePicks)
 
-        const tiebreakerId = `${currentUser.uid}_${activeWeek.weekId}`
-
-        const tiebreakerSnapshot = await getDoc(
-          doc(db, 'leagues', activeLeague!.id, 'tiebreakers', tiebreakerId),
-        )
-
         const loadedHomeTiebreakers: HomeTiebreakers = {}
 
-        if (tiebreakerSnapshot.exists()) {
-          const data = tiebreakerSnapshot.data()
+        /*
+         * Query the signed-in user's tiebreaker instead of directly
+         * reading a document that may not exist yet. Firestore rules
+         * can safely authorize this query because every returned
+         * document must belong to the current user.
+         */
+        const currentUserTiebreakers =
+          await getDocs(
+            query(
+              collection(
+                db,
+                'leagues',
+                activeLeague!.id,
+                'tiebreakers',
+              ),
+              where(
+                'userId',
+                '==',
+                currentUser.uid,
+              ),
+              where(
+                'weekId',
+                '==',
+                activeWeek.weekId,
+              ),
+            ),
+          )
 
-          if (typeof data.totalPoints === 'number') {
-            setTiebreaker(String(data.totalPoints))
-            loadedHomeTiebreakers[currentUser.uid] = data.totalPoints
+        const currentUserTiebreaker =
+          currentUserTiebreakers.docs[0]
+
+        if (currentUserTiebreaker) {
+          const data =
+            currentUserTiebreaker.data()
+
+          if (
+            typeof data.totalPoints ===
+            'number'
+          ) {
+            setTiebreaker(
+              String(data.totalPoints),
+            )
+            loadedHomeTiebreakers[
+              currentUser.uid
+            ] = data.totalPoints
           }
+        } else {
+          setTiebreaker('')
         }
 
         const loadedTiebreakerGame =
@@ -4313,6 +4952,348 @@ function App() {
       cancelled = true
     }
   }, [user, activeLeague?.id, gamesRefreshKey])
+
+  async function generateUniqueJoinCode() {
+    for (
+      let attempt = 0;
+      attempt < 20;
+      attempt += 1
+    ) {
+      const code =
+        makeJoinCode()
+
+      const inviteSnapshot =
+        await getDoc(
+          doc(
+            db,
+            'leagueInvites',
+            code,
+          ),
+        )
+
+      if (!inviteSnapshot.exists()) {
+        return code
+      }
+    }
+
+    throw new Error(
+      'Unable to generate a unique join code. Please try again.',
+    )
+  }
+
+  async function createLeague(
+    leagueName: string,
+  ) {
+    if (!user) {
+      throw new Error(
+        'You must be signed in to create a league.',
+      )
+    }
+
+    const cleanName =
+      leagueName.trim()
+
+    if (!cleanName) {
+      throw new Error(
+        'Enter a league name.',
+      )
+    }
+
+    const leagueId =
+      crypto.randomUUID()
+
+    const joinCode =
+      await generateUniqueJoinCode()
+
+    const league: League = {
+      id: leagueId,
+      name: cleanName,
+      joinCode,
+      season: SEASON,
+    }
+
+    /*
+     * These writes are intentionally sequential.
+     * The league must exist before the creator's admin membership
+     * can be authorized, and that membership must exist before the
+     * Week 1 and invite writes can be authorized by Firestore rules.
+     */
+    await setDoc(
+      doc(
+        db,
+        'leagues',
+        leagueId,
+      ),
+      {
+        name: cleanName,
+        joinCode,
+        season: SEASON,
+        createdBy: user.uid,
+        createdAt:
+          serverTimestamp(),
+      },
+    )
+
+    await setDoc(
+      doc(
+        db,
+        'leagues',
+        leagueId,
+        'members',
+        user.uid,
+      ),
+      {
+        userId: user.uid,
+        role: 'admin',
+        joinedAt:
+          serverTimestamp(),
+      },
+    )
+
+    await setDoc(
+      doc(
+        db,
+        'leagues',
+        leagueId,
+        'weeks',
+        DEFAULT_WEEK.weekId,
+      ),
+      {
+        ...DEFAULT_WEEK,
+        createdAt:
+          serverTimestamp(),
+      },
+    )
+
+    await setDoc(
+      doc(
+        db,
+        'leagueInvites',
+        joinCode,
+      ),
+      {
+        leagueId,
+        joinCode,
+        createdBy: user.uid,
+        createdAt:
+          serverTimestamp(),
+      },
+    )
+
+    await setDoc(
+      doc(
+        db,
+        'users',
+        user.uid,
+      ),
+      {
+        leagueIds:
+          arrayUnion(leagueId),
+      },
+      {
+        merge: true,
+      },
+    )
+
+    localStorage.setItem(
+      `college-pickem-active-league-${user.uid}`,
+      leagueId,
+    )
+
+    setAvailableLeagues(
+      (current) =>
+        [...current, league]
+          .filter(
+            (
+              item,
+              index,
+              all,
+            ) =>
+              all.findIndex(
+                (candidate) =>
+                  candidate.id ===
+                  item.id,
+              ) === index,
+          )
+          .sort((a, b) =>
+            a.name.localeCompare(
+              b.name,
+            ),
+          ),
+    )
+
+    setActiveLeague(league)
+    setLeaguesRefreshKey(
+      (value) => value + 1,
+    )
+
+    return league
+  }
+
+  async function joinLeague(
+    rawJoinCode: string,
+  ) {
+    if (!user) {
+      throw new Error(
+        'You must be signed in to join a league.',
+      )
+    }
+
+    const joinCode =
+      rawJoinCode
+        .trim()
+        .toUpperCase()
+
+    if (joinCode.length !== 6) {
+      throw new Error(
+        'Enter the 6-character join code.',
+      )
+    }
+
+    const inviteSnapshot =
+      await getDoc(
+        doc(
+          db,
+          'leagueInvites',
+          joinCode,
+        ),
+      )
+
+    if (!inviteSnapshot.exists()) {
+      throw new Error(
+        'That join code was not found.',
+      )
+    }
+
+    const inviteData =
+      inviteSnapshot.data()
+
+    const leagueId =
+      typeof inviteData.leagueId ===
+      'string'
+        ? inviteData.leagueId
+        : ''
+
+    if (!leagueId) {
+      throw new Error(
+        'That join code is invalid.',
+      )
+    }
+
+    const existingMembership =
+      await getDoc(
+        doc(
+          db,
+          'leagues',
+          leagueId,
+          'members',
+          user.uid,
+        ),
+      )
+
+    if (!existingMembership.exists()) {
+      await setDoc(
+        doc(
+          db,
+          'leagues',
+          leagueId,
+          'members',
+          user.uid,
+        ),
+        {
+          userId: user.uid,
+          role: 'player',
+          inviteId: joinCode,
+          joinedAt:
+            serverTimestamp(),
+        },
+      )
+    }
+
+    const leagueSnapshot =
+      await getDoc(
+        doc(
+          db,
+          'leagues',
+          leagueId,
+        ),
+      )
+
+    if (!leagueSnapshot.exists()) {
+      throw new Error(
+        'The league could not be found.',
+      )
+    }
+
+    const leagueData =
+      leagueSnapshot.data()
+
+    const league: League = {
+      id: leagueId,
+      name: String(
+        leagueData.name ??
+          'College Pick’em',
+      ),
+      joinCode: String(
+        leagueData.joinCode ??
+          joinCode,
+      ),
+      season:
+        typeof leagueData.season ===
+        'number'
+          ? leagueData.season
+          : SEASON,
+    }
+
+    await setDoc(
+      doc(
+        db,
+        'users',
+        user.uid,
+      ),
+      {
+        leagueIds:
+          arrayUnion(leagueId),
+      },
+      {
+        merge: true,
+      },
+    )
+
+    localStorage.setItem(
+      `college-pickem-active-league-${user.uid}`,
+      leagueId,
+    )
+
+    setAvailableLeagues(
+      (current) =>
+        [...current, league]
+          .filter(
+            (
+              item,
+              index,
+              all,
+            ) =>
+              all.findIndex(
+                (candidate) =>
+                  candidate.id ===
+                  item.id,
+              ) === index,
+          )
+          .sort((a, b) =>
+            a.name.localeCompare(
+              b.name,
+            ),
+          ),
+    )
+
+    setActiveLeague(league)
+    setLeaguesRefreshKey(
+      (value) => value + 1,
+    )
+
+    return league
+  }
 
   async function clearLeagueDraftSelections(leagueId: string) {
     const draftSnapshot = await getDocs(
@@ -4658,11 +5639,20 @@ function App() {
     return <LoginPage />
   }
 
-  if (dataLoading || !activeLeague) {
+  if (dataLoading) {
     return (
       <main className="loading-screen">
         Loading current week…
       </main>
+    )
+  }
+
+  if (!activeLeague) {
+    return (
+      <LeagueSetupPage
+        onCreateLeague={createLeague}
+        onJoinLeague={joinLeague}
+      />
     )
   }
 
@@ -4733,9 +5723,13 @@ function App() {
       <SettingsPage
         user={user}
         isAdmin={isAdmin}
-        leagueName={activeLeague?.name ?? 'College Pick’em'}
+        activeLeague={activeLeague!}
+        availableLeagues={availableLeagues}
         themePreference={themePreference}
         onThemePreferenceChange={setThemePreference}
+        onCreateLeague={createLeague}
+        onJoinLeague={joinLeague}
+        onSwitchLeague={switchLeague}
       />
     )
   } else if (
