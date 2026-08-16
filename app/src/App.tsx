@@ -124,8 +124,8 @@ type SeasonWeekData = {
 
 const SEASON = 2026
 const LEGACY_LEAGUE_ID = 'legacy-2026'
-const ESPN_SYNC_WORKFLOW_URL =
-  'https://github.com/alexmcdougall13/college-pickem/actions/workflows/sync-espn.yml'
+const ESPN_SYNC_WORKER_URL =
+  'https://college-pickem-sync.alexmcdougall.workers.dev'
 
 
 
@@ -2099,7 +2099,9 @@ function AdminPage({
   const [publishing, setPublishing] = useState(false)
   const [startingNextWeek, setStartingNextWeek] = useState(false)
   const [startingPostseason, setStartingPostseason] = useState(false)
-  const [reloadingEspnData, setReloadingEspnData] = useState(false)
+  const [, setReloadingEspnData] = useState(false)
+  const [refreshingEspn, setRefreshingEspn] = useState(false)
+  const [espnRefreshStatus, setEspnRefreshStatus] = useState('')
   const [lastEspnLoadAt, setLastEspnLoadAt] = useState<Date | null>(null)
   const [publishMessage, setPublishMessage] = useState('')
   const [error, setError] = useState('')
@@ -2383,12 +2385,144 @@ function AdminPage({
     }
   }
 
-  function openEspnRefresh() {
-    window.open(
-      ESPN_SYNC_WORKFLOW_URL,
-      '_blank',
-      'noopener,noreferrer',
-    )
+  async function refreshEspnData() {
+    if (refreshingEspn) return
+
+    const user = auth.currentUser
+
+    if (!user) {
+      setError('You must be signed in to refresh ESPN data.')
+      return
+    }
+
+    setRefreshingEspn(true)
+    setEspnRefreshStatus('Starting ESPN refresh…')
+    setError('')
+    setPublishMessage('')
+
+    try {
+      const token = await user.getIdToken()
+
+      const mode =
+        currentWeek.competitionType === 'postseason'
+          ? 'postseason'
+          : 'week'
+
+      const value =
+        mode === 'postseason'
+          ? ''
+          : String(currentWeek.weekNumber)
+
+      const response = await fetch(
+        `${ESPN_SYNC_WORKER_URL}/refresh`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            leagueId,
+            mode,
+            season: SEASON,
+            value,
+          }),
+        },
+      )
+
+      const result = await response.json()
+
+      if (!response.ok || result?.ok !== true) {
+        throw new Error(
+          result?.error ?? 'Unable to start ESPN refresh.',
+        )
+      }
+
+      const triggeredAt =
+        typeof result.triggeredAt === 'string'
+          ? result.triggeredAt
+          : new Date().toISOString()
+
+      setEspnRefreshStatus('ESPN refresh queued…')
+
+      const deadline = Date.now() + 3 * 60 * 1000
+
+      while (Date.now() < deadline) {
+        await new Promise((resolve) =>
+          window.setTimeout(resolve, 2500),
+        )
+
+        const statusResponse = await fetch(
+          `${ESPN_SYNC_WORKER_URL}/status?leagueId=${encodeURIComponent(
+            leagueId,
+          )}&since=${encodeURIComponent(triggeredAt)}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
+        )
+
+        const statusResult = await statusResponse.json()
+
+        if (!statusResponse.ok) {
+          throw new Error(
+            statusResult?.error ??
+              'Unable to check ESPN refresh status.',
+          )
+        }
+
+        if (
+          statusResult.status === 'queued' ||
+          statusResult.status === 'waiting'
+        ) {
+          setEspnRefreshStatus('ESPN refresh queued…')
+          continue
+        }
+
+        if (statusResult.status === 'running') {
+          setEspnRefreshStatus('Refreshing ESPN data…')
+          continue
+        }
+
+        if (statusResult.status === 'failed') {
+          throw new Error(
+            `ESPN refresh failed${
+              statusResult.conclusion
+                ? ` (${statusResult.conclusion})`
+                : ''
+            }.`,
+          )
+        }
+
+        if (statusResult.status === 'success') {
+          setEspnRefreshStatus('Loading updated ESPN data…')
+
+          await loadAvailableGames({
+            showLoading: false,
+          })
+
+          setEspnRefreshStatus('ESPN data updated.')
+          return
+        }
+      }
+
+      throw new Error(
+        'The ESPN refresh is taking longer than expected. Try again in a minute.',
+      )
+    } catch (refreshError) {
+      console.error(refreshError)
+
+      setError(
+        refreshError instanceof Error
+          ? refreshError.message
+          : 'Unable to refresh ESPN data.',
+      )
+
+      setEspnRefreshStatus('')
+    } finally {
+      setRefreshingEspn(false)
+    }
   }
 
   async function startNextWeek() {
@@ -2762,51 +2896,31 @@ function AdminPage({
           Published lines stay frozen until you explicitly republish.
         </p>
 
-        <div
+        <button
+          type="button"
+          onClick={refreshEspnData}
+          disabled={
+            refreshingEspn ||
+            publishing ||
+            savingId !== null
+          }
           style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
-            gap: 10,
+            width: '100%',
+            padding: '11px 10px',
+            border: '1px solid #cbd5e1',
+            borderRadius: 10,
+            background: 'transparent',
+            color: 'inherit',
+            font: 'inherit',
+            fontWeight: 800,
+            cursor: refreshingEspn ? 'wait' : 'pointer',
+            opacity: refreshingEspn ? 0.7 : 1,
           }}
         >
-          <button
-            type="button"
-            onClick={openEspnRefresh}
-            disabled={publishing || savingId !== null}
-            style={{
-              padding: '11px 10px',
-              border: '1px solid #cbd5e1',
-              borderRadius: 10,
-              background: 'transparent',
-              color: 'inherit',
-              font: 'inherit',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
-          >
-            Refresh ESPN Data
-          </button>
-
-          <button
-            type="button"
-            onClick={() =>
-              loadAvailableGames({ showLoading: false })
-            }
-            disabled={reloadingEspnData || publishing}
-            style={{
-              padding: '11px 10px',
-              border: '1px solid #cbd5e1',
-              borderRadius: 10,
-              background: 'transparent',
-              color: 'inherit',
-              font: 'inherit',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
-          >
-            {reloadingEspnData ? 'Reloading…' : 'Reload Latest Data'}
-          </button>
-        </div>
+          {refreshingEspn
+            ? 'Refreshing ESPN Data…'
+            : 'Refresh ESPN Data'}
+        </button>
 
         <p
           style={{
@@ -2815,14 +2929,16 @@ function AdminPage({
             fontSize: 11,
           }}
         >
-          {lastEspnLoadAt
-            ? `Admin list loaded ${lastEspnLoadAt.toLocaleTimeString([], {
-                hour: 'numeric',
-                minute: '2-digit',
-              })}.`
-            : 'Admin list has not been loaded yet.'}
-          {' '}The refresh button opens the secure GitHub Action; when
-          you return to this tab, the list reloads automatically.
+          {espnRefreshStatus
+            ? espnRefreshStatus
+            : lastEspnLoadAt
+              ? `Latest ESPN data loaded ${lastEspnLoadAt.toLocaleTimeString([], {
+                  hour: 'numeric',
+                  minute: '2-digit',
+                })}.`
+              : 'ESPN data has not been loaded yet.'}
+          {' '}The refresh now runs entirely inside the app and reloads
+          the Admin list automatically when the sync finishes.
         </p>
       </section>
 
