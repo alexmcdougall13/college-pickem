@@ -3,31 +3,25 @@ name: Sync ESPN Games
 on:
   workflow_dispatch:
     inputs:
-      date:
-        description: 'Date to import in YYYYMMDD format'
+      mode:
+        description: 'What do you want to sync?'
         required: true
-        default: '20260829'
+        type: choice
+        options:
+          - week
+          - postseason
+          - date
+        default: week
 
-  # During the regular season:
-  # - Every 5 minutes on Saturdays.
-  # - Every 15 minutes during common Thu/Fri/Sun game windows.
-  # The sync script exits without contacting ESPN when no published
-  # game is within its live-update window.
-  schedule:
-    - cron: '*/5 * * * 6'
-      timezone: 'America/New_York'
+      season:
+        description: 'College football season'
+        required: true
+        default: '2026'
 
-    - cron: '*/15 18-23 * * 4,5'
-      timezone: 'America/New_York'
-
-    - cron: '*/15 0-2 * * 5'
-      timezone: 'America/New_York'
-
-    - cron: '*/15 11-23 * * 0'
-      timezone: 'America/New_York'
-
-    - cron: '*/15 0-2 * * 1'
-      timezone: 'America/New_York'
+      value:
+        description: 'ESPN week number for Week mode, or YYYYMMDD for Date mode. Leave blank for Postseason.'
+        required: false
+        default: '1'
 
 jobs:
   sync:
@@ -56,9 +50,18 @@ jobs:
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
           FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
           FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
+          SYNC_MODE: ${{ inputs.mode }}
+          SYNC_SEASON: ${{ inputs.season }}
+          SYNC_VALUE: ${{ inputs.value }}
+
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            node scripts/sync-espn.mjs "${{ inputs.date }}"
+          if [ "$SYNC_MODE" = "week" ]; then
+            node scripts/sync-espn.mjs week "$SYNC_SEASON" "$SYNC_VALUE"
+          elif [ "$SYNC_MODE" = "postseason" ]; then
+            node scripts/sync-espn.mjs postseason "$SYNC_SEASON"
+          elif [ "$SYNC_MODE" = "date" ]; then
+            node scripts/sync-espn.mjs date "$SYNC_VALUE"
           else
-            node scripts/sync-espn.mjs
+            echo "Unknown sync mode: $SYNC_MODE"
+            exit 1
           fi

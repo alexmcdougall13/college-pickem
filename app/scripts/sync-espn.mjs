@@ -394,6 +394,77 @@ async function fetchScoreboard(date) {
   return response.json()
 }
 
+async function fetchScoreboardWeek(
+  season,
+  week,
+  seasonType = 2,
+) {
+  const response = await fetch(
+    `${ESPN_SCOREBOARD}?dates=${season}&seasontype=${seasonType}&week=${week}&groups=80&limit=1000`,
+  )
+
+  if (!response.ok) {
+    throw new Error(
+      `ESPN scoreboard request failed for season ${season}, week ${week}, season type ${seasonType}: ${response.status}`,
+    )
+  }
+
+  return response.json()
+}
+
+async function fetchPostseasonScoreboard(season) {
+  const eventsById = new Map()
+
+  let foundPostseasonGames = false
+  let consecutiveEmptyWeeks = 0
+
+  for (let week = 1; week <= 12; week += 1) {
+    const data = await fetchScoreboardWeek(
+      season,
+      week,
+      3,
+    )
+
+    const events = data?.events ?? []
+
+    console.log(
+      `ESPN postseason week ${week}: ${events.length} event(s)`,
+    )
+
+    if (events.length === 0) {
+      if (foundPostseasonGames) {
+        consecutiveEmptyWeeks += 1
+
+        if (consecutiveEmptyWeeks >= 2) {
+          break
+        }
+      }
+
+      continue
+    }
+
+    foundPostseasonGames = true
+    consecutiveEmptyWeeks = 0
+
+    for (const event of events) {
+      if (!event?.id) {
+        continue
+      }
+
+      eventsById.set(
+        String(event.id),
+        event,
+      )
+    }
+  }
+
+  return {
+    events: [
+      ...eventsById.values(),
+    ],
+  }
+}
+
 /*
  * Get current conference membership from the individual
  * ESPN team page.
@@ -897,29 +968,22 @@ async function syncPublishedGames() {
  * ============================================================
  */
 
-async function syncDate(date) {
+async function syncEvents(
+  events,
+  label,
+  {
+    replaceAvailableGames = false,
+  } = {},
+) {
   console.log(
-    `Loading ESPN games for ${date}...`,
+    `Loading ${label}...`,
   )
 
-  /*
-   * First get the games.
-   */
-  const data =
-    await fetchScoreboard(date)
-
-  const events =
-    data?.events ?? []
-
   console.log(
-    `ESPN returned ${events.length} events.`,
+    `ESPN returned ${events.length} event(s).`,
   )
 
-  /*
-   * Build a unique list of every team playing on this date.
-   */
-  const teamIds =
-    new Set()
+  const teamIds = new Set()
 
   for (const event of events) {
     const competition =
@@ -929,10 +993,7 @@ async function syncDate(date) {
       competition?.competitors ??
       []
 
-    for (
-      const competitor of
-      competitors
-    ) {
+    for (const competitor of competitors) {
       const teamId =
         competitor?.team?.id
 
@@ -948,17 +1009,11 @@ async function syncDate(date) {
     `Found ${teamIds.size} unique teams.`,
   )
 
-  /*
-   * Look up current conference membership for those teams.
-   */
   const conferenceMap =
     await fetchConferenceMap(
       teamIds,
     )
 
-  /*
-   * Parse and rate every game.
-   */
   const games = []
 
   for (const event of events) {
@@ -972,20 +1027,16 @@ async function syncDate(date) {
       games.push(game)
     }
 
-    await updatePublishedGameFromEvent(event)
+    await updatePublishedGameFromEvent(
+      event,
+    )
   }
 
-  /*
-   * Highest rating first.
-   */
   games.sort(
     (a, b) =>
       b.rating - a.rating,
   )
 
-  /*
-   * Ranking based on your rating system.
-   */
   games.forEach(
     (game, index) => {
       game.ratingRank =
@@ -993,12 +1044,35 @@ async function syncDate(date) {
     },
   )
 
-  /*
-   * Save to Firestore.
-   */
+  const existingSnapshot =
+    await db
+      .collection(
+        'availableGames',
+      )
+      .get()
+
+  const existingById =
+    new Map()
+
+  existingSnapshot.forEach(
+    (document) => {
+      existingById.set(
+        document.id,
+        document.data(),
+      )
+    },
+  )
+
   let written = 0
 
+  const currentGameIds =
+    new Set()
+
   for (const game of games) {
+    currentGameIds.add(
+      game.gameId,
+    )
+
     const ref =
       db
         .collection(
@@ -1006,36 +1080,30 @@ async function syncDate(date) {
         )
         .doc(game.gameId)
 
-    /*
-     * Preserve your Admin selections when ESPN refreshes.
-     */
     const existing =
-      await ref.get()
+      existingById.get(
+        game.gameId,
+      )
 
     const dataToSave = {
       ...game,
     }
 
-    if (existing.exists) {
-      const existingData =
-        existing.data()
-
+    if (existing) {
       if (
-        typeof existingData
-          .selected ===
+        typeof existing.selected ===
         'boolean'
       ) {
         dataToSave.selected =
-          existingData.selected
+          existing.selected
       }
 
       if (
-        typeof existingData
-          .tiebreaker ===
+        typeof existing.tiebreaker ===
         'boolean'
       ) {
         dataToSave.tiebreaker =
-          existingData.tiebreaker
+          existing.tiebreaker
       }
     }
 
@@ -1047,6 +1115,28 @@ async function syncDate(date) {
     )
 
     written += 1
+  }
+
+  if (replaceAvailableGames) {
+    const writer =
+      db.bulkWriter()
+
+    for (
+      const document of
+      existingSnapshot.docs
+    ) {
+      if (
+        !currentGameIds.has(
+          document.id,
+        )
+      ) {
+        writer.delete(
+          document.ref,
+        )
+      }
+    }
+
+    await writer.close()
   }
 
   console.log('')
@@ -1068,9 +1158,6 @@ async function syncDate(date) {
     )
   }
 
-  /*
-   * Explicitly list unresolved conference mappings.
-   */
   const unresolvedGames =
     games.filter(
       (game) =>
@@ -1100,25 +1187,150 @@ async function syncDate(date) {
   }
 }
 
+async function syncDate(date) {
+  const data =
+    await fetchScoreboard(date)
+
+  const events =
+    data?.events ?? []
+
+  await syncEvents(
+    events,
+    `ESPN games for ${date}`,
+  )
+}
+
+async function syncRegularWeek(
+  season,
+  week,
+) {
+  console.log(
+    `Loading complete ESPN regular-season Week ${week} for ${season}...`,
+  )
+
+  const data =
+    await fetchScoreboardWeek(
+      season,
+      week,
+      2,
+    )
+
+  const events =
+    data?.events ?? []
+
+  await syncEvents(
+    events,
+    `${season} regular-season Week ${week}`,
+    {
+      replaceAvailableGames: true,
+    },
+  )
+}
+
+async function syncPostseason(
+  season,
+) {
+  console.log(
+    `Loading complete ESPN postseason for ${season}...`,
+  )
+
+  const data =
+    await fetchPostseasonScoreboard(
+      season,
+    )
+
+  const events =
+    data?.events ?? []
+
+  console.log(
+    `Combined postseason slate contains ${events.length} unique game(s).`,
+  )
+
+  await syncEvents(
+    events,
+    `${season} Postseason`,
+    {
+      replaceAvailableGames: true,
+    },
+  )
+}
+
 /*
  * ============================================================
  * RUN
  * ============================================================
  */
 
-const date =
+const mode =
   process.argv[2]
 
-if (date) {
-  if (!/^\d{8}$/.test(date)) {
+if (!mode) {
+  await syncPublishedGames()
+} else if (mode === 'date') {
+  const date =
+    process.argv[3]
+
+  if (
+    !date ||
+    !/^\d{8}$/.test(date)
+  ) {
     throw new Error(
-      'Date must use YYYYMMDD format. Example: node scripts/sync-espn.mjs 20260829',
+      'Date mode requires YYYYMMDD. Example: node scripts/sync-espn.mjs date 20260829',
     )
   }
 
   await syncDate(date)
+} else if (mode === 'week') {
+  const season =
+    Number(process.argv[3])
+
+  const week =
+    Number(process.argv[4])
+
+  if (
+    !Number.isInteger(season) ||
+    season < 2000
+  ) {
+    throw new Error(
+      'Week mode requires a valid season.',
+    )
+  }
+
+  if (
+    !Number.isInteger(week) ||
+    week < 1
+  ) {
+    throw new Error(
+      'Week mode requires a valid ESPN week number.',
+    )
+  }
+
+  await syncRegularWeek(
+    season,
+    week,
+  )
+} else if (
+  mode === 'postseason'
+) {
+  const season =
+    Number(process.argv[3])
+
+  if (
+    !Number.isInteger(season) ||
+    season < 2000
+  ) {
+    throw new Error(
+      'Postseason mode requires a valid season.',
+    )
+  }
+
+  await syncPostseason(
+    season,
+  )
 } else {
-  await syncPublishedGames()
+  throw new Error(
+    `Unknown sync mode "${mode}". Use week, postseason, date, or no arguments for live-score refresh.`,
+  )
 }
 
 console.log('')
