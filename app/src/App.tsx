@@ -5150,14 +5150,26 @@ function App() {
       )
     }
 
-    const inviteSnapshot =
-      await getDoc(
-        doc(
-          db,
-          'leagueInvites',
-          joinCode,
-        ),
+    let inviteSnapshot
+
+    try {
+      inviteSnapshot =
+        await getDoc(
+          doc(
+            db,
+            'leagueInvites',
+            joinCode,
+          ),
+        )
+    } catch (error) {
+      console.error(
+        'Join step failed: read invite',
+        error,
       )
+      throw new Error(
+        'Join failed while checking the join code.',
+      )
+    }
 
     if (!inviteSnapshot.exists()) {
       throw new Error(
@@ -5180,44 +5192,84 @@ function App() {
       )
     }
 
-    const existingMembership =
-      await getDoc(
-        doc(
-          db,
-          'leagues',
-          leagueId,
-          'members',
-          user.uid,
-        ),
-      )
+    let existingMembership
 
-    if (!existingMembership.exists()) {
-      await setDoc(
-        doc(
-          db,
-          'leagues',
-          leagueId,
-          'members',
-          user.uid,
-        ),
-        {
-          userId: user.uid,
-          role: 'player',
-          inviteId: joinCode,
-          joinedAt:
-            serverTimestamp(),
-        },
+    try {
+      existingMembership =
+        await getDoc(
+          doc(
+            db,
+            'leagues',
+            leagueId,
+            'members',
+            user.uid,
+          ),
+        )
+    } catch (error) {
+      /*
+       * A non-member is not allowed to read the league's member
+       * collection yet. Treat that as "not joined" and proceed
+       * directly to the rules-authorized self-membership create.
+       */
+      console.info(
+        'No readable membership yet; attempting join.',
+        error,
       )
+      existingMembership = null
     }
 
-    const leagueSnapshot =
-      await getDoc(
-        doc(
-          db,
-          'leagues',
-          leagueId,
-        ),
+    if (
+      !existingMembership ||
+      !existingMembership.exists()
+    ) {
+      try {
+        await setDoc(
+          doc(
+            db,
+            'leagues',
+            leagueId,
+            'members',
+            user.uid,
+          ),
+          {
+            userId: user.uid,
+            role: 'player',
+            inviteId: joinCode,
+            joinedAt:
+              serverTimestamp(),
+          },
+        )
+      } catch (error) {
+        console.error(
+          'Join step failed: create membership',
+          error,
+        )
+        throw new Error(
+          'Join failed while creating your league membership.',
+        )
+      }
+    }
+
+    let leagueSnapshot
+
+    try {
+      leagueSnapshot =
+        await getDoc(
+          doc(
+            db,
+            'leagues',
+            leagueId,
+          ),
+        )
+    } catch (error) {
+      console.error(
+        'Join step failed: read league',
+        error,
       )
+      throw new Error(
+        'Join failed while loading the league.',
+      )
+    }
 
     if (!leagueSnapshot.exists()) {
       throw new Error(
@@ -5245,20 +5297,30 @@ function App() {
           : SEASON,
     }
 
-    await setDoc(
-      doc(
-        db,
-        'users',
-        user.uid,
-      ),
-      {
-        leagueIds:
-          arrayUnion(leagueId),
-      },
-      {
-        merge: true,
-      },
-    )
+    try {
+      await setDoc(
+        doc(
+          db,
+          'users',
+          user.uid,
+        ),
+        {
+          leagueIds:
+            arrayUnion(leagueId),
+        },
+        {
+          merge: true,
+        },
+      )
+    } catch (error) {
+      console.error(
+        'Join step failed: update user leagueIds',
+        error,
+      )
+      throw new Error(
+        'Join failed while saving the league to your account.',
+      )
+    }
 
     localStorage.setItem(
       `college-pickem-active-league-${user.uid}`,
