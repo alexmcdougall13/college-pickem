@@ -82,6 +82,7 @@ type AvailableGame = {
 type LeaguePlayer = {
   uid: string
   name: string
+  role?: LeagueRole
 }
 
 type LeagueRole = 'admin' | 'player'
@@ -3406,6 +3407,7 @@ function SettingsPage({
   isAdmin,
   activeLeague,
   availableLeagues,
+  leaguePlayers,
   themePreference,
   onThemePreferenceChange,
   onCreateLeague,
@@ -3416,6 +3418,7 @@ function SettingsPage({
   isAdmin: boolean
   activeLeague: League
   availableLeagues: League[]
+  leaguePlayers: LeaguePlayer[]
   themePreference: ThemePreference
   onThemePreferenceChange: (theme: ThemePreference) => void
   onCreateLeague: (leagueName: string) => Promise<League>
@@ -3428,6 +3431,7 @@ function SettingsPage({
     useState<'create' | 'join' | null>(null)
   const [leagueMessage, setLeagueMessage] = useState('')
   const [leagueError, setLeagueError] = useState('')
+  const [inviteMessage, setInviteMessage] = useState('')
 
   async function handleSignOut() {
     await signOut(auth)
@@ -3516,6 +3520,63 @@ function SettingsPage({
       )
     } finally {
       setLeagueAction(null)
+    }
+  }
+
+  async function shareInvite() {
+    if (!activeLeague.joinCode) {
+      return
+    }
+
+    const text =
+      `Join my ${activeLeague.name} College Pick’em league with code ${activeLeague.joinCode}.`
+
+    setInviteMessage('')
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title:
+            `${activeLeague.name} — College Pick’em`,
+          text,
+        })
+
+        setInviteMessage('Invite shared.')
+        return
+      }
+
+      await navigator.clipboard.writeText(
+        activeLeague.joinCode,
+      )
+
+      setInviteMessage(
+        'Join code copied.',
+      )
+    } catch (error) {
+      /*
+       * Share-sheet cancellation is not an app error.
+       */
+      if (
+        error instanceof DOMException &&
+        error.name === 'AbortError'
+      ) {
+        return
+      }
+
+      console.error(error)
+
+      try {
+        await navigator.clipboard.writeText(
+          activeLeague.joinCode,
+        )
+        setInviteMessage(
+          'Join code copied.',
+        )
+      } catch {
+        setInviteMessage(
+          `Join code: ${activeLeague.joinCode}`,
+        )
+      }
     }
   }
 
@@ -3684,8 +3745,143 @@ function SettingsPage({
               >
                 {activeLeague.joinCode}
               </div>
+
+              <button
+                type="button"
+                onClick={shareInvite}
+                style={{
+                  width: '100%',
+                  marginTop: 10,
+                  padding: '10px 12px',
+                  border:
+                    '1px solid #cbd5e1',
+                  borderRadius: 10,
+                  background:
+                    'transparent',
+                  color: 'inherit',
+                  font: 'inherit',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                Share Invite
+              </button>
+
+              {inviteMessage && (
+                <p
+                  style={{
+                    margin:
+                      '8px 0 0',
+                    fontSize: 12,
+                    fontWeight: 700,
+                    color:
+                      'var(--theme-muted, #64748b)',
+                  }}
+                >
+                  {inviteMessage}
+                </p>
+              )}
             </div>
           )}
+
+        <div
+          style={{
+            marginTop: 20,
+          }}
+        >
+          <h3
+            style={{
+              marginBottom: 8,
+            }}
+          >
+            Members
+          </h3>
+
+          <div
+            style={{
+              border:
+                '1px solid #d9e0ea',
+              borderRadius: 10,
+              overflow: 'hidden',
+            }}
+          >
+            {leaguePlayers
+              .slice()
+              .sort((a, b) => {
+                if (
+                  a.uid === user.uid
+                ) return -1
+
+                if (
+                  b.uid === user.uid
+                ) return 1
+
+                if (
+                  a.role !== b.role
+                ) {
+                  return a.role ===
+                    'admin'
+                    ? -1
+                    : 1
+                }
+
+                return a.name.localeCompare(
+                  b.name,
+                )
+              })
+              .map(
+                (player, index) => (
+                  <div
+                    key={player.uid}
+                    style={{
+                      display: 'flex',
+                      justifyContent:
+                        'space-between',
+                      gap: 12,
+                      alignItems:
+                        'center',
+                      padding:
+                        '11px 12px',
+                      borderBottom:
+                        index ===
+                        leaguePlayers.length -
+                          1
+                          ? 'none'
+                          : '1px solid #edf0f5',
+                    }}
+                  >
+                    <div>
+                      <strong>
+                        {player.name}
+                        {player.uid ===
+                          user.uid
+                          ? ' (You)'
+                          : ''}
+                      </strong>
+                    </div>
+
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 800,
+                        textTransform:
+                          'uppercase',
+                        letterSpacing:
+                          '.04em',
+                        color:
+                          'var(--theme-muted, #64748b)',
+                      }}
+                    >
+                      {player.role ===
+                      'admin'
+                        ? 'Admin'
+                        : 'Player'}
+                    </span>
+                  </div>
+                ),
+              )}
+          </div>
+        </div>
 
         <form
           onSubmit={handleCreateLeague}
@@ -4543,6 +4739,19 @@ function App() {
           ),
         )
 
+        const memberRoles = new Map(
+          leagueMembersSnapshot.docs.map((memberDocument) => {
+            const data = memberDocument.data()
+
+            return [
+              String(data.userId ?? memberDocument.id),
+              data.role === 'admin'
+                ? 'admin'
+                : 'player',
+            ] as const
+          }),
+        )
+
         const savedPlayers: LeaguePlayer[] = allUsersSnapshot.docs
           .filter((userDocument) => memberIds.has(userDocument.id))
           .map((userDocument) => {
@@ -4568,6 +4777,10 @@ function App() {
                 savedFirstName ||
                 savedName ||
                 fallbackName,
+              role:
+                memberRoles.get(
+                  userDocument.id,
+                ) ?? 'player',
             }
           })
           .sort((a, b) => a.name.localeCompare(b.name))
@@ -5787,6 +6000,7 @@ function App() {
         isAdmin={isAdmin}
         activeLeague={activeLeague!}
         availableLeagues={availableLeagues}
+        leaguePlayers={leaguePlayers}
         themePreference={themePreference}
         onThemePreferenceChange={setThemePreference}
         onCreateLeague={createLeague}
@@ -5844,56 +6058,80 @@ function App() {
 
   return (
     <div className="app-shell">
-      {availableLeagues.length > 1 && (
+      <div
+        style={{
+          maxWidth: 760,
+          margin: '0 auto',
+          padding: '12px 16px 0',
+        }}
+      >
         <div
           style={{
-            maxWidth: 760,
-            margin: '0 auto',
-            padding: '12px 16px 0',
+            fontSize: 11,
+            fontWeight: 800,
+            color:
+              'var(--theme-muted, #64748b)',
+            textTransform:
+              'uppercase',
+            letterSpacing:
+              '.04em',
+            marginBottom: 6,
           }}
         >
-          <label
+          League
+        </div>
+
+        {availableLeagues.length > 1 ? (
+          <select
+            value={activeLeague!.id}
+            onChange={(event) =>
+              switchLeague(
+                event.target.value,
+              )
+            }
             style={{
               display: 'block',
-              fontSize: 11,
+              width: '100%',
+              padding:
+                '10px 12px',
+              border:
+                '1px solid #cbd5e1',
+              borderRadius: 10,
+              background:
+                'var(--theme-card, #fff)',
+              color: 'inherit',
+              font: 'inherit',
               fontWeight: 800,
-              color: 'var(--theme-muted, #64748b)',
-              textTransform: 'uppercase',
-              letterSpacing: '.04em',
             }}
           >
-            League
-
-            <select
-              value={activeLeague!.id}
-              onChange={(event) =>
-                switchLeague(event.target.value)
-              }
-              style={{
-                display: 'block',
-                width: '100%',
-                marginTop: 6,
-                padding: '10px 12px',
-                border: '1px solid #cbd5e1',
-                borderRadius: 10,
-                background: 'var(--theme-card, #fff)',
-                color: 'inherit',
-                font: 'inherit',
-                fontWeight: 800,
-              }}
-            >
-              {availableLeagues.map((league) => (
+            {availableLeagues.map(
+              (league) => (
                 <option
                   key={league.id}
                   value={league.id}
                 >
                   {league.name}
                 </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      )}
+              ),
+            )}
+          </select>
+        ) : (
+          <div
+            style={{
+              padding:
+                '10px 12px',
+              border:
+                '1px solid #d9e0ea',
+              borderRadius: 10,
+              background:
+                'var(--theme-card, #fff)',
+              fontWeight: 800,
+            }}
+          >
+            {activeLeague!.name}
+          </div>
+        )}
+      </div>
 
       <main className="app-content">{page}</main>
 
