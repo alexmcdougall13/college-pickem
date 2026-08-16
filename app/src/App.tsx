@@ -3638,6 +3638,7 @@ function App() {
   )
   const [user, setUser] = useState<User | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [availableLeagues, setAvailableLeagues] = useState<League[]>([])
   const [activeLeague, setActiveLeague] = useState<League | null>(null)
   const [authLoading, setAuthLoading] = useState(true)
   const [dataLoading, setDataLoading] = useState(false)
@@ -3689,39 +3690,180 @@ function App() {
   }, [])
 
   useEffect(() => {
-  if (!user) {
-    setIsAdmin(false)
-    setActiveLeague(null)
-    setGames([])
-    setPicks({})
-    setLeaguePlayers([])
-    setHomePicks({})
-    setHomeTiebreakers({})
-    setTiebreaker('')
-    setCurrentWeek(DEFAULT_WEEK)
-    setSeasonWeeks([])
-    return
-  }
+    if (!user) {
+      setIsAdmin(false)
+      setAvailableLeagues([])
+      setActiveLeague(null)
+      setGames([])
+      setPicks({})
+      setLeaguePlayers([])
+      setHomePicks({})
+      setHomeTiebreakers({})
+      setTiebreaker('')
+      setCurrentWeek(DEFAULT_WEEK)
+      setSeasonWeeks([])
+      return
+    }
 
-  const currentUser = user
+    const currentUser = user
+    let cancelled = false
 
-  async function loadUserData() {
+    async function loadUserLeagues() {
       setDataLoading(true)
       setSaveError('')
 
       try {
-        const leagueRef = doc(db, 'leagues', LEGACY_LEAGUE_ID)
-        const leagueSnapshot = await getDoc(leagueRef)
+        const userSnapshot = await getDoc(
+          doc(db, 'users', currentUser.uid),
+        )
 
-        if (!leagueSnapshot.exists()) {
-          throw new Error('The migrated league could not be found.')
+        const savedLeagueIds =
+          userSnapshot.exists() &&
+          Array.isArray(userSnapshot.data().leagueIds)
+            ? userSnapshot
+                .data()
+                .leagueIds.filter(
+                  (leagueId: unknown): leagueId is string =>
+                    typeof leagueId === 'string' &&
+                    leagueId.trim().length > 0,
+                )
+            : []
+
+        /*
+         * Compatibility fallback for the migrated original league.
+         * Create/Join League will write leagueIds to the user profile.
+         */
+        const candidateLeagueIds = Array.from(
+          new Set([
+            ...savedLeagueIds,
+            LEGACY_LEAGUE_ID,
+          ]),
+        )
+
+        const memberships: {
+          league: League
+          role: LeagueRole
+        }[] = []
+
+        for (const leagueId of candidateLeagueIds) {
+          const membershipSnapshot = await getDoc(
+            doc(
+              db,
+              'leagues',
+              leagueId,
+              'members',
+              currentUser.uid,
+            ),
+          )
+
+          if (!membershipSnapshot.exists()) {
+            continue
+          }
+
+          const leagueSnapshot = await getDoc(
+            doc(db, 'leagues', leagueId),
+          )
+
+          if (!leagueSnapshot.exists()) {
+            continue
+          }
+
+          const leagueData = leagueSnapshot.data()
+          const membershipData = membershipSnapshot.data()
+
+          memberships.push({
+            league: {
+              id: leagueId,
+              name: String(leagueData.name ?? 'College Pick’em'),
+              joinCode: String(leagueData.joinCode ?? ''),
+              season:
+                typeof leagueData.season === 'number'
+                  ? leagueData.season
+                  : SEASON,
+            },
+            role:
+              membershipData.role === 'admin'
+                ? 'admin'
+                : 'player',
+          })
         }
 
+        if (cancelled) return
+
+        if (memberships.length === 0) {
+          throw new Error(
+            'No league memberships were found for your account.',
+          )
+        }
+
+        const leagues = memberships
+          .map((membership) => membership.league)
+          .sort((a, b) => a.name.localeCompare(b.name))
+
+        setAvailableLeagues(leagues)
+
+        const savedActiveLeagueId =
+          localStorage.getItem(
+            `college-pickem-active-league-${currentUser.uid}`,
+          )
+
+        const chosenLeague =
+          leagues.find(
+            (league) => league.id === savedActiveLeagueId,
+          ) ??
+          leagues.find(
+            (league) => league.id === LEGACY_LEAGUE_ID,
+          ) ??
+          leagues[0]
+
+        setActiveLeague(chosenLeague)
+      } catch (error) {
+        console.error(error)
+
+        if (!cancelled) {
+          setSaveError(
+            'Unable to load your leagues. Please refresh and try again.',
+          )
+          setAvailableLeagues([])
+          setActiveLeague(null)
+        }
+      } finally {
+        if (!cancelled) {
+          setDataLoading(false)
+        }
+      }
+    }
+
+    loadUserLeagues()
+
+    return () => {
+      cancelled = true
+    }
+  }, [user])
+
+  useEffect(() => {
+    if (!user || !activeLeague) {
+      return
+    }
+
+    const currentUser = user
+    let cancelled = false
+
+    localStorage.setItem(
+      `college-pickem-active-league-${currentUser.uid}`,
+      activeLeague!.id,
+    )
+
+    async function loadLeagueData() {
+      setDataLoading(true)
+      setSaveError('')
+
+      try {
         const membershipSnapshot = await getDoc(
           doc(
             db,
             'leagues',
-            LEGACY_LEAGUE_ID,
+            activeLeague!.id,
             'members',
             currentUser.uid,
           ),
@@ -3731,31 +3873,25 @@ function App() {
           throw new Error('Your league membership could not be found.')
         }
 
-        const leagueData = leagueSnapshot.data()
         const membershipData = membershipSnapshot.data()
 
         const chosenMembership: LeagueMembership = {
-          leagueId: LEGACY_LEAGUE_ID,
+          leagueId: activeLeague!.id,
           userId: currentUser.uid,
-          role: membershipData.role === 'admin' ? 'admin' : 'player',
+          role:
+            membershipData.role === 'admin'
+              ? 'admin'
+              : 'player',
         }
 
-        setActiveLeague({
-          id: LEGACY_LEAGUE_ID,
-          name: String(leagueData.name ?? 'College Pick’em'),
-          joinCode: String(leagueData.joinCode ?? ''),
-          season:
-            typeof leagueData.season === 'number'
-              ? leagueData.season
-              : SEASON,
-        })
+        if (cancelled) return
 
         setIsAdmin(chosenMembership.role === 'admin')
 
         const allUsersSnapshot = await getDocs(collection(db, 'users'))
 
         const weeksSnapshot = await getDocs(
-          collection(db, 'leagues', LEGACY_LEAGUE_ID, 'weeks'),
+          collection(db, 'leagues', activeLeague!.id, 'weeks'),
         )
 
         const loadedWeeks: Week[] = weeksSnapshot.docs
@@ -3792,7 +3928,7 @@ function App() {
           collection(
             db,
             'leagues',
-            LEGACY_LEAGUE_ID,
+            activeLeague!.id,
             'members',
           ),
         )
@@ -3835,7 +3971,7 @@ function App() {
         setLeaguePlayers(savedPlayers)
 
         const gamesQuery = query(
-          collection(db, 'leagues', LEGACY_LEAGUE_ID, 'games'),
+          collection(db, 'leagues', activeLeague!.id, 'games'),
           where('weekId', '==', activeWeek.weekId),
           where('selected', '==', true),
         )
@@ -3892,7 +4028,7 @@ function App() {
         setGames(loadedGames)
 
         const picksQuery = query(
-          collection(db, 'leagues', LEGACY_LEAGUE_ID, 'picks'),
+          collection(db, 'leagues', activeLeague!.id, 'picks'),
           where('userId', '==', currentUser.uid),
           where('weekId', '==', activeWeek.weekId),
         )
@@ -3935,7 +4071,7 @@ function App() {
           lockedGames.map(async (game) => {
             const revealedSnapshot = await getDocs(
               query(
-                collection(db, 'leagues', LEGACY_LEAGUE_ID, 'picks'),
+                collection(db, 'leagues', activeLeague!.id, 'picks'),
                 where('gameId', '==', game.gameId),
               ),
             )
@@ -3958,7 +4094,7 @@ function App() {
         const tiebreakerId = `${currentUser.uid}_${activeWeek.weekId}`
 
         const tiebreakerSnapshot = await getDoc(
-          doc(db, 'leagues', LEGACY_LEAGUE_ID, 'tiebreakers', tiebreakerId),
+          doc(db, 'leagues', activeLeague!.id, 'tiebreakers', tiebreakerId),
         )
 
         const loadedHomeTiebreakers: HomeTiebreakers = {}
@@ -3981,7 +4117,7 @@ function App() {
         ) {
           const revealedTiebreakers = await getDocs(
             query(
-              collection(db, 'leagues', LEGACY_LEAGUE_ID, 'tiebreakers'),
+              collection(db, 'leagues', activeLeague!.id, 'tiebreakers'),
               where('gameId', '==', loadedTiebreakerGame.gameId),
             ),
           )
@@ -4014,7 +4150,7 @@ function App() {
 
           const historicalGamesSnapshot = await getDocs(
             query(
-              collection(db, 'leagues', LEGACY_LEAGUE_ID, 'games'),
+              collection(db, 'leagues', activeLeague!.id, 'games'),
               where('weekId', '==', week.weekId),
               where('selected', '==', true),
             ),
@@ -4088,7 +4224,7 @@ function App() {
               .map(async (game) => {
                 const pickSnapshot = await getDocs(
                   query(
-                    collection(db, 'leagues', LEGACY_LEAGUE_ID, 'picks'),
+                    collection(db, 'leagues', activeLeague!.id, 'picks'),
                     where('gameId', '==', game.gameId),
                   ),
                 )
@@ -4116,7 +4252,7 @@ function App() {
           ) {
             const tiebreakerSnapshot = await getDocs(
               query(
-                collection(db, 'leagues', LEGACY_LEAGUE_ID, 'tiebreakers'),
+                collection(db, 'leagues', activeLeague!.id, 'tiebreakers'),
                 where(
                   'gameId',
                   '==',
@@ -4149,14 +4285,34 @@ function App() {
         setSeasonWeeks(seasonData)
       } catch (error) {
         console.error(error)
-        setSaveError('Unable to load the current week.')
+
+        if (!cancelled) {
+          setSaveError(
+            'Unable to load this league. Please refresh and try again.',
+          )
+        }
       } finally {
-        setDataLoading(false)
+        if (!cancelled) {
+          setDataLoading(false)
+        }
       }
     }
 
-    loadUserData()
-  }, [user, gamesRefreshKey])
+    setActiveTab('home')
+    setGames([])
+    setPicks({})
+    setLeaguePlayers([])
+    setHomePicks({})
+    setHomeTiebreakers({})
+    setTiebreaker('')
+    setSeasonWeeks([])
+
+    loadLeagueData()
+
+    return () => {
+      cancelled = true
+    }
+  }, [user, activeLeague?.id, gamesRefreshKey])
 
   async function clearLeagueDraftSelections(leagueId: string) {
     const draftSnapshot = await getDocs(
@@ -4199,7 +4355,7 @@ function App() {
     const nextWeekLabel = `Week ${nextWeekNumber}`
 
     await setDoc(
-      doc(db, 'leagues', LEGACY_LEAGUE_ID, 'weeks', currentWeek.weekId),
+      doc(db, 'leagues', activeLeague!.id, 'weeks', currentWeek.weekId),
       {
         status: 'final',
         finalizedAt: serverTimestamp(),
@@ -4220,7 +4376,7 @@ function App() {
     }
 
     await setDoc(
-      doc(db, 'leagues', LEGACY_LEAGUE_ID, 'weeks', nextWeekId),
+      doc(db, 'leagues', activeLeague!.id, 'weeks', nextWeekId),
       {
         ...nextWeek,
         createdAt: serverTimestamp(),
@@ -4228,7 +4384,7 @@ function App() {
       { merge: true },
     )
 
-    await clearLeagueDraftSelections(activeLeague?.id ?? LEGACY_LEAGUE_ID)
+    await clearLeagueDraftSelections(activeLeague!.id)
 
     setCurrentWeek(nextWeek)
     setSeasonWeeks((current) => [
@@ -4267,7 +4423,7 @@ function App() {
     }
 
     const existingPostseason = await getDoc(
-      doc(db, 'leagues', LEGACY_LEAGUE_ID, 'weeks', `${SEASON}-postseason`),
+      doc(db, 'leagues', activeLeague!.id, 'weeks', `${SEASON}-postseason`),
     )
 
     if (existingPostseason.exists()) {
@@ -4288,7 +4444,7 @@ function App() {
     }
 
     await setDoc(
-      doc(db, 'leagues', LEGACY_LEAGUE_ID, 'weeks', currentWeek.weekId),
+      doc(db, 'leagues', activeLeague!.id, 'weeks', currentWeek.weekId),
       {
         status: 'final',
         finalizedAt: serverTimestamp(),
@@ -4297,7 +4453,7 @@ function App() {
     )
 
     await setDoc(
-      doc(db, 'leagues', LEGACY_LEAGUE_ID, 'weeks', postseasonId),
+      doc(db, 'leagues', activeLeague!.id, 'weeks', postseasonId),
       {
         ...postseason,
         createdAt: serverTimestamp(),
@@ -4305,7 +4461,7 @@ function App() {
       { merge: true },
     )
 
-    await clearLeagueDraftSelections(activeLeague?.id ?? LEGACY_LEAGUE_ID)
+    await clearLeagueDraftSelections(activeLeague!.id)
 
     setCurrentWeek(postseason)
     setSeasonWeeks((current) => [
@@ -4327,8 +4483,9 @@ function App() {
   }
 
   async function refreshPublishedGames() {
+    if (!activeLeague) return
     const currentWeekSnapshot = await getDoc(
-      doc(db, 'leagues', LEGACY_LEAGUE_ID, 'weeks', currentWeek.weekId),
+      doc(db, 'leagues', activeLeague!.id, 'weeks', currentWeek.weekId),
     )
 
     if (currentWeekSnapshot.exists()) {
@@ -4386,7 +4543,7 @@ function App() {
     try {
       const pickId = `${user.uid}_${currentWeek.weekId}_${gameId}`
 
-      await setDoc(doc(db, 'leagues', LEGACY_LEAGUE_ID, 'picks', pickId), {
+      await setDoc(doc(db, 'leagues', activeLeague!.id, 'picks', pickId), {
         userId: user.uid,
         weekId: currentWeek.weekId,
         gameId,
@@ -4431,7 +4588,7 @@ function App() {
   }
 
   async function saveTiebreaker(value: string) {
-    if (!user) return
+    if (!user || !activeLeague) return
 
     const tiebreakerGame = games.find(
       (game) => game.tiebreaker,
@@ -4470,7 +4627,7 @@ function App() {
       const tiebreakerId = `${user.uid}_${currentWeek.weekId}`
 
       await setDoc(
-        doc(db, 'leagues', LEGACY_LEAGUE_ID, 'tiebreakers', tiebreakerId),
+        doc(db, 'leagues', activeLeague!.id, 'tiebreakers', tiebreakerId),
         {
           userId: user.uid,
           weekId: currentWeek.weekId,
@@ -4501,7 +4658,7 @@ function App() {
     return <LoginPage />
   }
 
-  if (dataLoading) {
+  if (dataLoading || !activeLeague) {
     return (
       <main className="loading-screen">
         Loading current week…
@@ -4587,7 +4744,7 @@ function App() {
   ) {
     page = (
       <AdminPage
-        leagueId={activeLeague?.id ?? LEGACY_LEAGUE_ID}
+        leagueId={activeLeague!.id}
         onPublished={refreshPublishedGames}
         onStartNextWeek={startNextWeek}
         onStartPostseason={startPostseason}
@@ -4613,8 +4770,75 @@ function App() {
     )
   }
 
+  function switchLeague(leagueId: string) {
+    const nextLeague =
+      availableLeagues.find(
+        (league) => league.id === leagueId,
+      )
+
+    if (
+      !nextLeague ||
+      nextLeague.id === activeLeague!.id
+    ) {
+      return
+    }
+
+    setActiveLeague(nextLeague)
+  }
+
   return (
     <div className="app-shell">
+      {availableLeagues.length > 1 && (
+        <div
+          style={{
+            maxWidth: 760,
+            margin: '0 auto',
+            padding: '12px 16px 0',
+          }}
+        >
+          <label
+            style={{
+              display: 'block',
+              fontSize: 11,
+              fontWeight: 800,
+              color: 'var(--theme-muted, #64748b)',
+              textTransform: 'uppercase',
+              letterSpacing: '.04em',
+            }}
+          >
+            League
+
+            <select
+              value={activeLeague!.id}
+              onChange={(event) =>
+                switchLeague(event.target.value)
+              }
+              style={{
+                display: 'block',
+                width: '100%',
+                marginTop: 6,
+                padding: '10px 12px',
+                border: '1px solid #cbd5e1',
+                borderRadius: 10,
+                background: 'var(--theme-card, #fff)',
+                color: 'inherit',
+                font: 'inherit',
+                fontWeight: 800,
+              }}
+            >
+              {availableLeagues.map((league) => (
+                <option
+                  key={league.id}
+                  value={league.id}
+                >
+                  {league.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      )}
+
       <main className="app-content">{page}</main>
 
       <nav
