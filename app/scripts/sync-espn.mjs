@@ -379,25 +379,115 @@ function calculateRating({
  * ============================================================
  */
 
-async function fetchScoreboard(date) {
+async function fetchScoreboard(dateOrRange) {
   const response =
     await fetch(
-      `${ESPN_SCOREBOARD}?dates=${date}&limit=1000`,
+      `${ESPN_SCOREBOARD}?dates=${dateOrRange}&groups=80&limit=1000`,
     )
 
   if (!response.ok) {
     throw new Error(
-      `ESPN scoreboard request failed for ${date}: ${response.status}`,
+      `ESPN scoreboard request failed for ${dateOrRange}: ${response.status}`,
     )
   }
 
   return response.json()
 }
 
+function formatDateForEspn(date) {
+  const year = date.getUTCFullYear()
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(date.getUTCDate()).padStart(2, '0')
+
+  return `${year}${month}${day}`
+}
+
+function getRegularWeekDateRange(season, week) {
+  if (season !== 2026) {
+    throw new Error(
+      `No regular-season date calendar is configured yet for ${season}.`,
+    )
+  }
+
+  if (!Number.isInteger(week) || week < 1) {
+    throw new Error('Week must be a positive integer.')
+  }
+
+  if (week === 1) {
+    return {
+      start: '20260829',
+      end: '20260907',
+    }
+  }
+
+  const week2Start =
+    new Date(
+      Date.UTC(
+        2026,
+        8,
+        8,
+      ),
+    )
+
+  const start =
+    new Date(
+      week2Start.getTime() +
+        (week - 2) *
+          7 *
+          24 *
+          60 *
+          60 *
+          1000,
+    )
+
+  const end =
+    new Date(
+      start.getTime() +
+        6 *
+          24 *
+          60 *
+          60 *
+          1000,
+    )
+
+  return {
+    start:
+      formatDateForEspn(
+        start,
+      ),
+    end:
+      formatDateForEspn(
+        end,
+      ),
+  }
+}
+
+async function fetchRegularWeekScoreboard(
+  season,
+  week,
+) {
+  const {
+    start,
+    end,
+  } =
+    getRegularWeekDateRange(
+      season,
+      week,
+    )
+
+  console.log(
+    `ESPN date range for Week ${week}: ${start}-${end}`,
+  )
+
+  return fetchScoreboard(
+    `${start}-${end}`,
+  )
+}
+
 async function fetchScoreboardWeek(
   season,
   week,
-  seasonType = 2,
+  seasonType = 3,
 ) {
   const response = await fetch(
     `${ESPN_SCOREBOARD}?dates=${season}&seasontype=${seasonType}&week=${week}&groups=80&limit=1000`,
@@ -983,7 +1073,8 @@ async function syncEvents(
     `ESPN returned ${events.length} event(s).`,
   )
 
-  const teamIds = new Set()
+  const teamIds =
+    new Set()
 
   for (const event of events) {
     const competition =
@@ -1064,7 +1155,6 @@ async function syncEvents(
   )
 
   let written = 0
-
   const currentGameIds =
     new Set()
 
@@ -1189,7 +1279,9 @@ async function syncEvents(
 
 async function syncDate(date) {
   const data =
-    await fetchScoreboard(date)
+    await fetchScoreboard(
+      date,
+    )
 
   const events =
     data?.events ?? []
@@ -1209,10 +1301,9 @@ async function syncRegularWeek(
   )
 
   const data =
-    await fetchScoreboardWeek(
+    await fetchRegularWeekScoreboard(
       season,
       week,
-      2,
     )
 
   const events =
@@ -1222,7 +1313,8 @@ async function syncRegularWeek(
     events,
     `${season} regular-season Week ${week}`,
     {
-      replaceAvailableGames: true,
+      replaceAvailableGames:
+        true,
     },
   )
 }
@@ -1250,7 +1342,8 @@ async function syncPostseason(
     events,
     `${season} Postseason`,
     {
-      replaceAvailableGames: true,
+      replaceAvailableGames:
+        true,
     },
   )
 }
@@ -1266,7 +1359,9 @@ const mode =
 
 if (!mode) {
   await syncPublishedGames()
-} else if (mode === 'date') {
+} else if (
+  mode === 'date'
+) {
   const date =
     process.argv[3]
 
@@ -1279,16 +1374,26 @@ if (!mode) {
     )
   }
 
-  await syncDate(date)
-} else if (mode === 'week') {
+  await syncDate(
+    date,
+  )
+} else if (
+  mode === 'week'
+) {
   const season =
-    Number(process.argv[3])
+    Number(
+      process.argv[3],
+    )
 
   const week =
-    Number(process.argv[4])
+    Number(
+      process.argv[4],
+    )
 
   if (
-    !Number.isInteger(season) ||
+    !Number.isInteger(
+      season,
+    ) ||
     season < 2000
   ) {
     throw new Error(
@@ -1297,7 +1402,9 @@ if (!mode) {
   }
 
   if (
-    !Number.isInteger(week) ||
+    !Number.isInteger(
+      week,
+    ) ||
     week < 1
   ) {
     throw new Error(
@@ -1313,10 +1420,14 @@ if (!mode) {
   mode === 'postseason'
 ) {
   const season =
-    Number(process.argv[3])
+    Number(
+      process.argv[3],
+    )
 
   if (
-    !Number.isInteger(season) ||
+    !Number.isInteger(
+      season,
+    ) ||
     season < 2000
   ) {
     throw new Error(
