@@ -1,22 +1,13 @@
-import {
-  cert,
-  initializeApp,
-} from 'firebase-admin/app'
+import { cert, initializeApp } from 'firebase-admin/app'
+import { FieldValue, getFirestore } from 'firebase-admin/firestore'
+import { getMessaging } from 'firebase-admin/messaging'
 
-import {
-  FieldValue,
-  getFirestore,
-} from 'firebase-admin/firestore'
+const REMINDER_WINDOW_MINUTES = Number(
+  process.env.REMINDER_WINDOW_MINUTES ?? 35,
+)
 
-import {
-  getMessaging,
-} from 'firebase-admin/messaging'
-
-const REMINDER_WINDOW_MINUTES =
-  Number(
-    process.env.REMINDER_WINDOW_MINUTES ??
-      35,
-  )
+const TEST_MODE =
+  process.env.TEST_MODE === 'true'
 
 const serviceAccount = {
   projectId:
@@ -49,16 +40,11 @@ initializeApp({
 const db = getFirestore()
 const messaging = getMessaging()
 
-function isActiveMember(data) {
-  return data?.active !== false
-}
-
 function toMillis(value) {
   if (!value) return NaN
 
   if (
-    typeof value.toMillis ===
-    'function'
+    typeof value.toMillis === 'function'
   ) {
     return value.toMillis()
   }
@@ -70,16 +56,16 @@ function toMillis(value) {
   return NaN
 }
 
-function reminderMarkerId(
+function markerId(
   weekId,
   userId,
-  gameId,
+  itemId,
 ) {
   return [
-    'pick-reminder',
+    'pick-reminder-v2',
     weekId,
     userId,
-    gameId,
+    itemId,
   ]
     .map((value) =>
       String(value).replace(
@@ -111,211 +97,171 @@ async function enabledFidsForUser(
     new Set(
       snapshot.docs
         .map(
-          (document) =>
-            document.data()
+          (doc) =>
+            doc.data()
               .installationId,
         )
         .filter(
-          (installationId) =>
-            typeof installationId ===
+          (fid) =>
+            typeof fid ===
               'string' &&
-            installationId.length > 0,
+            fid.length > 0,
         ),
     ),
   )
 }
 
-async function sendReminder({
+async function alreadyReminded(
   leagueId,
-  leagueName,
   weekId,
-  weekLabel,
   userId,
-  missingGames,
-  missingTiebreaker,
-}) {
-  const fids =
-    await enabledFidsForUser(
-      userId,
-    )
-
-  if (fids.length === 0) {
-    return {
-      sent: false,
-      reason: 'no-enabled-devices',
-    }
+  itemId,
+) {
+  /*
+   * Test mode deliberately ignores
+   * reminder markers so we can test
+   * repeatedly without affecting
+   * production reminders.
+   */
+  if (TEST_MODE) {
+    return false
   }
 
-  const pickCount =
-    missingGames.length
-
-  const pieces = []
-
-  if (pickCount > 0) {
-    pieces.push(
-      pickCount === 1
-        ? '1 pick'
-        : `${pickCount} picks`,
-    )
-  }
-
-  if (missingTiebreaker) {
-    pieces.push('your tiebreaker')
-  }
-
-  const dueText =
-    pieces.length > 1
-      ? `${pieces
-          .slice(0, -1)
-          .join(', ')} and ${
-          pieces[
-            pieces.length - 1
-          ]
-        }`
-      : pieces[0]
-
-  const body =
-    `${dueText} ${
-      pieces.length === 1
-        ? 'is'
-        : 'are'
-    } still missing for ${weekLabel}.`
-
-  const response =
-    await messaging
-      .sendEachForMulticast({
-        fids,
-
-        notification: {
-          title:
-            `${leagueName} — Pick Reminder`,
-
-          body,
-        },
-
-        data: {
-          type: 'pick-reminder',
-          leagueId,
+  const snapshot =
+    await db
+      .collection('leagues')
+      .doc(leagueId)
+      .collection(
+        'notificationEvents',
+      )
+      .doc(
+        markerId(
           weekId,
-        },
-      })
+          userId,
+          itemId,
+        ),
+      )
+      .get()
 
-  if (response.successCount === 0) {
-    console.error(
-      `No devices accepted reminder for ${userId}.`,
-    )
-
-    response.responses.forEach(
-      (result, index) => {
-        if (!result.success) {
-          console.error(
-            `Device ${index + 1}:`,
-            result.error,
-          )
-        }
-      },
-    )
-
-    return {
-      sent: false,
-      reason: 'all-devices-failed',
-    }
-  }
-
-  const markerBatch = db.batch()
-
-  for (const game of missingGames) {
-    const markerRef =
-      db
-        .collection('leagues')
-        .doc(leagueId)
-        .collection(
-          'notificationEvents',
-        )
-        .doc(
-          reminderMarkerId(
-            weekId,
-            userId,
-            game.gameId,
-          ),
-        )
-
-    markerBatch.set(
-      markerRef,
-      {
-        type: 'pick-reminder',
-        userId,
-        weekId,
-        gameId: game.gameId,
-        sentAt:
-          FieldValue.serverTimestamp(),
-      },
-      {
-        merge: true,
-      },
-    )
-  }
-
-  if (missingTiebreaker) {
-    const markerRef =
-      db
-        .collection('leagues')
-        .doc(leagueId)
-        .collection(
-          'notificationEvents',
-        )
-        .doc(
-          reminderMarkerId(
-            weekId,
-            userId,
-            'tiebreaker',
-          ),
-        )
-
-    markerBatch.set(
-      markerRef,
-      {
-        type: 'pick-reminder',
-        userId,
-        weekId,
-        gameId: 'tiebreaker',
-        sentAt:
-          FieldValue.serverTimestamp(),
-      },
-      {
-        merge: true,
-      },
-    )
-  }
-
-  await markerBatch.commit()
-
-  console.log(
-    `✓ ${leagueName}: reminded ${userId} about ${body}`,
-  )
-
-  return {
-    sent: true,
-  }
+  return snapshot.exists
 }
 
-async function processLeague(
-  leagueDocument,
+function describeLeague(
+  reminder,
+) {
+  const parts = []
+
+  if (
+    reminder.missingGames.length > 0
+  ) {
+    parts.push(
+      reminder.missingGames.length === 1
+        ? '1 pick'
+        : `${reminder.missingGames.length} picks`,
+    )
+  }
+
+  if (
+    reminder.missingTiebreaker
+  ) {
+    parts.push(
+      'your tiebreaker',
+    )
+  }
+
+  const due =
+    parts.length === 1
+      ? parts[0]
+      : `${parts
+          .slice(0, -1)
+          .join(', ')} and ${
+          parts[
+            parts.length - 1
+          ]
+        }`
+
+  return `${due} in ${reminder.leagueName}`
+}
+
+function buildBody(
+  reminders,
+) {
+  /*
+   * If everything missing belongs
+   * to one league, keep the message
+   * short and natural.
+   */
+  if (reminders.length === 1) {
+    const reminder =
+      reminders[0]
+
+    const parts = []
+
+    if (
+      reminder.missingGames.length >
+      0
+    ) {
+      parts.push(
+        reminder.missingGames.length ===
+          1
+          ? '1 pick'
+          : `${reminder.missingGames.length} picks`,
+      )
+    }
+
+    if (
+      reminder.missingTiebreaker
+    ) {
+      parts.push(
+        'your tiebreaker',
+      )
+    }
+
+    const due =
+      parts.length === 1
+        ? parts[0]
+        : `${parts
+            .slice(0, -1)
+            .join(', ')} and ${
+            parts[
+              parts.length - 1
+            ]
+          }`
+
+    return `${due} ${
+      parts.length === 1
+        ? 'is'
+        : 'are'
+    } still missing for ${reminder.weekLabel}.`
+  }
+
+  /*
+   * Multiple leagues are combined
+   * into one notification.
+   */
+  return `You still have picks due: ${reminders
+    .map(describeLeague)
+    .join('; ')}.`
+}
+
+async function collectLeague(
+  leagueDoc,
   now,
+  remindersByUser,
 ) {
   const leagueId =
-    leagueDocument.id
+    leagueDoc.id
 
-  const league =
-    leagueDocument.data()
+  const leagueData =
+    leagueDoc.data()
 
   const leagueName =
     String(
-      league.name ??
+      leagueData.name ??
         'College Pick’em',
     )
 
-  const openWeeks =
+  const weeksSnapshot =
     await db
       .collection('leagues')
       .doc(leagueId)
@@ -332,23 +278,17 @@ async function processLeague(
       )
       .get()
 
-  if (openWeeks.empty) {
-    return 0
-  }
-
-  let remindersSent = 0
-
   for (
-    const weekDocument of
-    openWeeks.docs
+    const weekDoc of
+    weeksSnapshot.docs
   ) {
     const week =
-      weekDocument.data()
+      weekDoc.data()
 
     const weekId =
       String(
         week.weekId ??
-          weekDocument.id,
+          weekDoc.id,
       )
 
     const weekLabel =
@@ -374,7 +314,7 @@ async function processLeague(
         )
         .get()
 
-    const reminderCutoff =
+    const cutoff =
       now +
       REMINDER_WINDOW_MINUTES *
         60 *
@@ -382,15 +322,15 @@ async function processLeague(
 
     const dueGames =
       gamesSnapshot.docs
-        .map((document) => {
+        .map((doc) => {
           const data =
-            document.data()
+            doc.data()
 
           return {
             gameId:
               String(
                 data.gameId ??
-                  document.id,
+                  doc.id,
               ),
 
             kickoffMs:
@@ -411,10 +351,12 @@ async function processLeague(
             ) &&
             game.kickoffMs > now &&
             game.kickoffMs <=
-              reminderCutoff,
+              cutoff,
         )
 
-    if (dueGames.length === 0) {
+    if (
+      dueGames.length === 0
+    ) {
       continue
     }
 
@@ -426,25 +368,23 @@ async function processLeague(
         .get()
 
     for (
-      const memberDocument of
+      const memberDoc of
       membersSnapshot.docs
     ) {
       const member =
-        memberDocument.data()
+        memberDoc.data()
 
-      if (!isActiveMember(member)) {
+      if (
+        member.active === false
+      ) {
         continue
       }
 
       const userId =
         String(
           member.userId ??
-            memberDocument.id,
+            memberDoc.id,
         )
-
-      if (!userId) {
-        continue
-      }
 
       const picksSnapshot =
         await db
@@ -467,62 +407,54 @@ async function processLeague(
         new Set(
           picksSnapshot.docs
             .map(
-              (document) =>
-                document.data()
+              (doc) =>
+                doc.data()
                   .gameId,
             )
             .filter(Boolean)
             .map(String),
         )
 
-      const unpickedDueGames =
-        dueGames.filter(
-          (game) =>
-            !pickedGameIds.has(
-              game.gameId,
-            ),
-        )
-
-      const eventCollection =
-        db
-          .collection('leagues')
-          .doc(leagueId)
-          .collection(
-            'notificationEvents',
-          )
-
       const missingGames = []
 
       for (
         const game of
-        unpickedDueGames
+        dueGames
       ) {
-        const marker =
-          await eventCollection
-            .doc(
-              reminderMarkerId(
-                weekId,
-                userId,
-                game.gameId,
-              ),
-            )
-            .get()
+        if (
+          pickedGameIds.has(
+            game.gameId,
+          )
+        ) {
+          continue
+        }
 
-        if (!marker.exists) {
-          missingGames.push(game)
+        const sent =
+          await alreadyReminded(
+            leagueId,
+            weekId,
+            userId,
+            game.gameId,
+          )
+
+        if (!sent) {
+          missingGames.push(
+            game,
+          )
         }
       }
-
-      const tiebreakerGame =
-        dueGames.find(
-          (game) => game.tiebreaker,
-        )
 
       let missingTiebreaker =
         false
 
+      const tiebreakerGame =
+        dueGames.find(
+          (game) =>
+            game.tiebreaker,
+        )
+
       if (tiebreakerGame) {
-        const tiebreakers =
+        const tiebreakersSnapshot =
           await db
             .collection('leagues')
             .doc(leagueId)
@@ -541,20 +473,19 @@ async function processLeague(
             )
             .get()
 
-        if (tiebreakers.empty) {
-          const marker =
-            await eventCollection
-              .doc(
-                reminderMarkerId(
-                  weekId,
-                  userId,
-                  'tiebreaker',
-                ),
-              )
-              .get()
+        if (
+          tiebreakersSnapshot.empty
+        ) {
+          const sent =
+            await alreadyReminded(
+              leagueId,
+              weekId,
+              userId,
+              'tiebreaker',
+            )
 
           missingTiebreaker =
-            !marker.exists
+            !sent
         }
       }
 
@@ -565,52 +496,283 @@ async function processLeague(
         continue
       }
 
-      const result =
-        await sendReminder({
-          leagueId,
-          leagueName,
-          weekId,
-          weekLabel,
-          userId,
-          missingGames,
-          missingTiebreaker,
-        })
-
-      if (result.sent) {
-        remindersSent += 1
+      const reminder = {
+        leagueId,
+        leagueName,
+        weekId,
+        weekLabel,
+        missingGames,
+        missingTiebreaker,
       }
+
+      const existing =
+        remindersByUser.get(
+          userId,
+        ) ?? []
+
+      existing.push(
+        reminder,
+      )
+
+      remindersByUser.set(
+        userId,
+        existing,
+      )
+    }
+  }
+}
+
+async function markItems(
+  userId,
+  reminders,
+) {
+  /*
+   * A manual test must not create
+   * production reminder markers.
+   */
+  if (TEST_MODE) {
+    return
+  }
+
+  const batch =
+    db.batch()
+
+  for (
+    const reminder of
+    reminders
+  ) {
+    for (
+      const game of
+      reminder.missingGames
+    ) {
+      const ref =
+        db
+          .collection('leagues')
+          .doc(
+            reminder.leagueId,
+          )
+          .collection(
+            'notificationEvents',
+          )
+          .doc(
+            markerId(
+              reminder.weekId,
+              userId,
+              game.gameId,
+            ),
+          )
+
+      batch.set(
+        ref,
+        {
+          type:
+            'pick-reminder',
+
+          userId,
+
+          weekId:
+            reminder.weekId,
+
+          gameId:
+            game.gameId,
+
+          sentAt:
+            FieldValue.serverTimestamp(),
+        },
+        {
+          merge: true,
+        },
+      )
+    }
+
+    if (
+      reminder.missingTiebreaker
+    ) {
+      const ref =
+        db
+          .collection('leagues')
+          .doc(
+            reminder.leagueId,
+          )
+          .collection(
+            'notificationEvents',
+          )
+          .doc(
+            markerId(
+              reminder.weekId,
+              userId,
+              'tiebreaker',
+            ),
+          )
+
+      batch.set(
+        ref,
+        {
+          type:
+            'pick-reminder',
+
+          userId,
+
+          weekId:
+            reminder.weekId,
+
+          gameId:
+            'tiebreaker',
+
+          sentAt:
+            FieldValue.serverTimestamp(),
+        },
+        {
+          merge: true,
+        },
+      )
     }
   }
 
-  return remindersSent
+  await batch.commit()
 }
 
-const now = Date.now()
+async function sendUserReminder(
+  userId,
+  reminders,
+) {
+  const fids =
+    await enabledFidsForUser(
+      userId,
+    )
+
+  if (
+    fids.length === 0
+  ) {
+    console.log(
+      `Skipping ${userId}: no enabled notification devices.`,
+    )
+
+    return false
+  }
+
+  const body =
+    buildBody(
+      reminders,
+    )
+
+  /*
+   * This is deliberately one send
+   * per USER rather than one send
+   * per league.
+   */
+  const response =
+    await messaging
+      .sendEachForMulticast({
+        fids,
+
+        notification: {
+          title:
+            'College Pick’em — Pick Reminder',
+
+          body,
+        },
+
+        data: {
+          type:
+            'pick-reminder',
+        },
+      })
+
+  if (
+    response.successCount === 0
+  ) {
+    console.error(
+      `No devices accepted reminder for ${userId}.`,
+    )
+
+    response.responses.forEach(
+      (result, index) => {
+        if (!result.success) {
+          console.error(
+            `Device ${index + 1}:`,
+            result.error,
+          )
+        }
+      },
+    )
+
+    return false
+  }
+
+  await markItems(
+    userId,
+    reminders,
+  )
+
+  console.log(
+    `✓ Reminded ${userId}: ${body}`,
+  )
+
+  return true
+}
+
+const now =
+  Date.now()
 
 console.log(
   `Checking for missing picks due within ${REMINDER_WINDOW_MINUTES} minutes...`,
 )
+
+if (TEST_MODE) {
+  console.log(
+    'TEST MODE: reminder markers will not be read or written.',
+  )
+}
 
 const leaguesSnapshot =
   await db
     .collection('leagues')
     .get()
 
+const remindersByUser =
+  new Map()
+
+/*
+ * First collect everything each
+ * user owes across ALL leagues.
+ */
+for (
+  const leagueDoc of
+  leaguesSnapshot.docs
+) {
+  await collectLeague(
+    leagueDoc,
+    now,
+    remindersByUser,
+  )
+}
+
+/*
+ * Then send exactly one notification
+ * to each user who owes something.
+ */
 let totalSent = 0
 
 for (
-  const leagueDocument of
-  leaguesSnapshot.docs
+  const [
+    userId,
+    reminders,
+  ] of remindersByUser
 ) {
-  totalSent +=
-    await processLeague(
-      leagueDocument,
-      now,
+  const sent =
+    await sendUserReminder(
+      userId,
+      reminders,
     )
+
+  if (sent) {
+    totalSent += 1
+  }
 }
 
 console.log('')
 
 console.log(
-  `Pick reminder check complete. Sent ${totalSent} reminder(s).`,
+  `Pick reminder check complete. Sent ${totalSent} user reminder(s).`,
 )

@@ -20,7 +20,7 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore'
-import { auth, db } from './firebase/firebase'
+import { auth, db, firebaseApp } from './firebase/firebase'
 import './App.css'
 
 type Tab =
@@ -3480,6 +3480,13 @@ function SettingsPage({
   onDemoteMember,
   onRemoveMember,
   onReinstateMember,
+  notificationSupported,
+  notificationPermission,
+  notificationsEnabled,
+  notificationBusy,
+  notificationMessage,
+  onEnableNotifications,
+  onDisableNotifications,
 }: {
   user: User
   isAdmin: boolean
@@ -3495,6 +3502,13 @@ function SettingsPage({
   onDemoteMember: (userId: string) => Promise<void>
   onRemoveMember: (userId: string) => Promise<void>
   onReinstateMember: (userId: string) => Promise<void>
+  notificationSupported: boolean
+  notificationPermission: NotificationPermission
+  notificationsEnabled: boolean
+  notificationBusy: boolean
+  notificationMessage: string
+  onEnableNotifications: () => Promise<void>
+  onDisableNotifications: () => Promise<void>
 }) {
   const [newLeagueName, setNewLeagueName] = useState('')
   const [joinCode, setJoinCode] = useState('')
@@ -3879,6 +3893,136 @@ function SettingsPage({
             </button>
           ))}
         </div>
+      </div>
+
+      <div className="settings-card account-settings-card">
+        <h2>Notifications</h2>
+
+        <p
+          style={{
+            marginTop: 6,
+            color:
+              'var(--theme-muted, #64748b)',
+          }}
+        >
+          Get reminders for missing picks, newly published weeks,
+          and completed weekly results.
+        </p>
+
+        {!notificationSupported ? (
+          <p
+            style={{
+              marginTop: 12,
+              fontWeight: 800,
+            }}
+          >
+            Push notifications are not supported in this browser.
+          </p>
+        ) : notificationPermission === 'denied' ? (
+          <div
+            style={{
+              marginTop: 12,
+              padding: 12,
+              border:
+                '1px solid #d9e0ea',
+              borderRadius: 10,
+            }}
+          >
+            <strong>
+              Notifications are blocked for this site.
+            </strong>
+
+            <p
+              style={{
+                margin:
+                  '6px 0 0',
+                color:
+                  'var(--theme-muted, #64748b)',
+                fontSize: 12,
+              }}
+            >
+              Allow notifications in your browser/site settings,
+              then return here and enable them.
+            </p>
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={
+              notificationBusy
+            }
+            onClick={() =>
+              notificationsEnabled
+                ? onDisableNotifications()
+                : onEnableNotifications()
+            }
+            style={{
+              width: '100%',
+              marginTop: 12,
+              padding: '11px 12px',
+              border:
+                notificationsEnabled
+                  ? '1px solid #cbd5e1'
+                  : 0,
+              borderRadius: 10,
+              background:
+                notificationsEnabled
+                  ? 'transparent'
+                  : 'var(--theme-accent, #2563eb)',
+              color:
+                notificationsEnabled
+                  ? 'inherit'
+                  : '#fff',
+              font: 'inherit',
+              fontWeight: 800,
+              cursor:
+                notificationBusy
+                  ? 'wait'
+                  : 'pointer',
+              opacity:
+                notificationBusy
+                  ? 0.7
+                  : 1,
+            }}
+          >
+            {notificationBusy
+              ? 'Updating…'
+              : notificationsEnabled
+                ? 'Disable Notifications on This Device'
+                : 'Enable Notifications on This Device'}
+          </button>
+        )}
+
+        <p
+          style={{
+            margin:
+              '9px 0 0',
+            color:
+              'var(--theme-muted, #64748b)',
+            fontSize: 12,
+          }}
+        >
+          {notificationsEnabled
+            ? 'Notifications are enabled on this device.'
+            : notificationPermission === 'default'
+              ? 'Notifications have not been enabled on this device.'
+              : notificationPermission === 'granted'
+                ? 'Browser permission is granted, but this device is not currently registered.'
+                : ''}
+        </p>
+
+        {notificationMessage && (
+          <p
+            style={{
+              margin:
+                '8px 0 0',
+              fontWeight: 800,
+              fontSize: 12,
+            }}
+          >
+            {notificationMessage}
+          </p>
+        )}
       </div>
 
       <div className="settings-card account-settings-card">
@@ -4942,6 +5086,433 @@ function App() {
   const [currentWeek, setCurrentWeek] = useState<Week>(DEFAULT_WEEK)
   const [seasonWeeks, setSeasonWeeks] = useState<SeasonWeekData[]>([])
   const [gamesRefreshKey, setGamesRefreshKey] = useState(0)
+  const [notificationSupported, setNotificationSupported] = useState(true)
+  const [notificationPermission, setNotificationPermission] =
+    useState<NotificationPermission>(() =>
+      typeof Notification === 'undefined'
+        ? 'default'
+        : Notification.permission,
+    )
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false)
+  const [notificationBusy, setNotificationBusy] = useState(false)
+  const [notificationMessage, setNotificationMessage] = useState('')
+
+  function notificationDeviceId() {
+    const storageKey =
+      'college-pickem-notification-device-id'
+
+    const existing =
+      localStorage.getItem(
+        storageKey,
+      )
+
+    if (existing) {
+      return existing
+    }
+
+    const deviceId =
+      crypto.randomUUID()
+
+    localStorage.setItem(
+      storageKey,
+      deviceId,
+    )
+
+    return deviceId
+  }
+
+  function notificationEnabledKey(
+    uid: string,
+  ) {
+    return `college-pickem-notifications-enabled-${uid}`
+  }
+
+  async function saveNotificationRegistration(
+    uid: string,
+    installationId: string,
+  ) {
+    const deviceId =
+      notificationDeviceId()
+
+    await setDoc(
+      doc(
+        db,
+        'users',
+        uid,
+        'notificationRegistrations',
+        deviceId,
+      ),
+      {
+        installationId,
+        enabled: true,
+        platform:
+          navigator.platform || '',
+        userAgent:
+          navigator.userAgent,
+        updatedAt:
+          serverTimestamp(),
+      },
+      {
+        merge: true,
+      },
+    )
+
+    localStorage.setItem(
+      notificationEnabledKey(uid),
+      'true',
+    )
+
+    setNotificationsEnabled(true)
+  }
+
+  async function registerNotificationsForUser(
+    currentUser: User,
+    requestPermission: boolean,
+  ) {
+    const messagingModule =
+      await import(
+        'firebase/messaging'
+      )
+
+    const supported =
+      await messagingModule.isSupported()
+
+    setNotificationSupported(
+      supported,
+    )
+
+    if (!supported) {
+      throw new Error(
+        'Push notifications are not supported in this browser.',
+      )
+    }
+
+    let permission =
+      Notification.permission
+
+    if (
+      requestPermission &&
+      permission === 'default'
+    ) {
+      permission =
+        await Notification.requestPermission()
+    }
+
+    setNotificationPermission(
+      permission,
+    )
+
+    if (permission !== 'granted') {
+      if (permission === 'denied') {
+        throw new Error(
+          'Notifications are blocked for this site.',
+        )
+      }
+
+      throw new Error(
+        'Notification permission was not granted.',
+      )
+    }
+
+    const registration =
+      await navigator.serviceWorker.register(
+        '/firebase-messaging-sw.js',
+      )
+
+    const messaging =
+      messagingModule.getMessaging(
+        firebaseApp,
+      )
+
+    const installationId =
+      await new Promise<string>(
+        (resolve, reject) => {
+          let settled = false
+          let stopRegistered =
+            () => {}
+
+          const timer =
+            window.setTimeout(
+              () => {
+                if (settled) return
+
+                settled = true
+                stopRegistered()
+                reject(
+                  new Error(
+                    'Notification registration timed out. Please try again.',
+                  ),
+                )
+              },
+              15000,
+            )
+
+          stopRegistered =
+            messagingModule.onRegistered(
+              messaging,
+              (fid) => {
+                if (settled) return
+
+                settled = true
+                window.clearTimeout(
+                  timer,
+                )
+                stopRegistered()
+                resolve(fid)
+              },
+            )
+
+          messagingModule
+            .register(
+              messaging,
+              {
+                vapidKey:
+                  import.meta.env
+                    .VITE_FIREBASE_VAPID_KEY,
+                serviceWorkerRegistration:
+                  registration,
+              },
+            )
+            .catch((error) => {
+              if (settled) return
+
+              settled = true
+              window.clearTimeout(
+                timer,
+              )
+              stopRegistered()
+              reject(error)
+            })
+        },
+      )
+
+    await saveNotificationRegistration(
+      currentUser.uid,
+      installationId,
+    )
+
+    return messaging
+  }
+
+  async function enableNotifications() {
+    if (!user) return
+
+    setNotificationBusy(true)
+    setNotificationMessage('')
+
+    try {
+      await registerNotificationsForUser(
+        user,
+        true,
+      )
+
+      setNotificationMessage(
+        'Notifications enabled on this device.',
+      )
+    } catch (error) {
+      console.error(error)
+
+      setNotificationMessage(
+        error instanceof Error
+          ? error.message
+          : 'Unable to enable notifications.',
+      )
+    } finally {
+      setNotificationBusy(false)
+    }
+  }
+
+  async function disableNotifications() {
+    if (!user) return
+
+    setNotificationBusy(true)
+    setNotificationMessage('')
+
+    try {
+      const messagingModule =
+        await import(
+          'firebase/messaging'
+        )
+
+      if (
+        await messagingModule.isSupported()
+      ) {
+        const messaging =
+          messagingModule.getMessaging(
+            firebaseApp,
+          )
+
+        await messagingModule.unregister(
+          messaging,
+        )
+      }
+
+      const deviceId =
+        notificationDeviceId()
+
+      await setDoc(
+        doc(
+          db,
+          'users',
+          user.uid,
+          'notificationRegistrations',
+          deviceId,
+        ),
+        {
+          enabled: false,
+          updatedAt:
+            serverTimestamp(),
+        },
+        {
+          merge: true,
+        },
+      )
+
+      localStorage.removeItem(
+        notificationEnabledKey(
+          user.uid,
+        ),
+      )
+
+      setNotificationsEnabled(false)
+      setNotificationMessage(
+        'Notifications disabled on this device.',
+      )
+    } catch (error) {
+      console.error(error)
+
+      setNotificationMessage(
+        error instanceof Error
+          ? error.message
+          : 'Unable to disable notifications.',
+      )
+    } finally {
+      setNotificationBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    let stopForeground:
+      | (() => void)
+      | undefined
+
+    async function initializeNotifications() {
+      const messagingModule =
+        await import(
+          'firebase/messaging'
+        )
+
+      const supported =
+        await messagingModule.isSupported()
+
+      if (cancelled) return
+
+      setNotificationSupported(
+        supported,
+      )
+
+      if (!supported) {
+        return
+      }
+
+      setNotificationPermission(
+        Notification.permission,
+      )
+
+      if (!user) {
+        setNotificationsEnabled(
+          false,
+        )
+        return
+      }
+
+      const enabled =
+        localStorage.getItem(
+          notificationEnabledKey(
+            user.uid,
+          ),
+        ) === 'true'
+
+      setNotificationsEnabled(
+        enabled &&
+          Notification.permission ===
+            'granted',
+      )
+
+      const messaging =
+        messagingModule.getMessaging(
+          firebaseApp,
+        )
+
+      stopForeground =
+        messagingModule.onMessage(
+          messaging,
+          (payload) => {
+            if (
+              Notification.permission !==
+              'granted'
+            ) {
+              return
+            }
+
+            const title =
+              payload.notification
+                ?.title ??
+              payload.data?.title ??
+              'College Pick’em'
+
+            const body =
+              payload.notification
+                ?.body ??
+              payload.data?.body ??
+              ''
+
+            navigator.serviceWorker.ready
+              .then(
+                (registration) =>
+                  registration.showNotification(
+                    title,
+                    {
+                      body,
+                    },
+                  ),
+              )
+              .catch((error) => {
+                console.error(
+                  'Unable to show foreground notification.',
+                  error,
+                )
+              })
+          },
+        )
+
+      if (
+        enabled &&
+        Notification.permission ===
+          'granted'
+      ) {
+        try {
+          await registerNotificationsForUser(
+            user,
+            false,
+          )
+        } catch (error) {
+          console.error(
+            'Unable to refresh notification registration.',
+            error,
+          )
+        }
+      }
+    }
+
+    initializeNotifications()
+
+    return () => {
+      cancelled = true
+      stopForeground?.()
+    }
+  }, [user])
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
@@ -6866,6 +7437,13 @@ function App() {
         }
         onRemoveMember={removeLeagueMember}
         onReinstateMember={reinstateLeagueMember}
+        notificationSupported={notificationSupported}
+        notificationPermission={notificationPermission}
+        notificationsEnabled={notificationsEnabled}
+        notificationBusy={notificationBusy}
+        notificationMessage={notificationMessage}
+        onEnableNotifications={enableNotifications}
+        onDisableNotifications={disableNotifications}
       />
     )
   } else if (

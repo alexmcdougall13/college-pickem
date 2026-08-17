@@ -8,6 +8,15 @@ on:
         required: true
         default: '100000'
 
+      test_mode:
+        description: 'Test without creating reminder markers'
+        required: true
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+        default: 'true'
+
 jobs:
   remind:
     runs-on: ubuntu-latest
@@ -36,5 +45,6 @@ jobs:
           FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
           FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
           REMINDER_WINDOW_MINUTES: ${{ inputs.reminder_window_minutes }}
+          TEST_MODE: ${{ inputs.test_mode }}
 
         run: node scripts/send-pick-reminders.mjs
