@@ -1,0 +1,40 @@
+name: Pick Reminder Notifications
+
+on:
+  workflow_dispatch:
+    inputs:
+      reminder_window_minutes:
+        description: 'How far ahead to look for missing picks'
+        required: true
+        default: '100000'
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Send missing-pick reminders
+        env:
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
+          FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
+          REMINDER_WINDOW_MINUTES: ${{ inputs.reminder_window_minutes }}
+
+        run: node scripts/send-pick-reminders.mjs
