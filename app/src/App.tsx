@@ -83,6 +83,8 @@ type LeaguePlayer = {
   uid: string
   name: string
   role?: LeagueRole
+  active?: boolean
+  activeThroughWeekNumber?: number | null
 }
 
 type LeagueRole = 'admin' | 'player'
@@ -168,6 +170,27 @@ function makeJoinCode() {
   }
 
   return code
+}
+
+function playerParticipatedInWeek(
+  player: LeaguePlayer,
+  week: Week,
+) {
+  if (player.active !== false) {
+    return true
+  }
+
+  if (
+    typeof player.activeThroughWeekNumber ===
+    'number'
+  ) {
+    return (
+      week.weekNumber <=
+      player.activeThroughWeekNumber
+    )
+  }
+
+  return true
 }
 
 const regularTabs: { id: Tab; label: string; icon: string }[] = [
@@ -1014,9 +1037,16 @@ function StandingsPage({
   for (const weekData of seasonWeeks) {
     const { week, games: weekGames, picks: weekPicks, tiebreakers } = weekData
     const finalGames = weekGames.filter((game) => game.final)
+    const eligibleRows =
+      rows.filter((player) =>
+        playerParticipatedInWeek(
+          player,
+          week,
+        ),
+      )
 
     for (const game of finalGames) {
-      for (const player of rows) {
+      for (const player of eligibleRows) {
         if (!player.uid) continue
 
         const pick = weekPicks[game.gameId]?.[player.uid]
@@ -1038,7 +1068,7 @@ function StandingsPage({
       continue
     }
 
-    const weekResults = rows
+    const weekResults = eligibleRows
       .filter((player) => Boolean(player.uid))
       .map((player) => {
         const weekCorrect = weekGames.reduce((total, game) => {
@@ -1156,6 +1186,12 @@ function StandingsPage({
   }
 
   const currentWeekRows = players
+    .filter((player) =>
+      playerParticipatedInWeek(
+        player,
+        currentWeek,
+      ),
+    )
     .map((player) => {
       if (!player.uid || !currentWeekData) {
         return {
@@ -1434,11 +1470,19 @@ function HistoryPage({
     orderedWeeks[0] ??
     null
 
-  const orderedPlayers = [...players].sort((a, b) => {
-    if (a.uid === currentUserId) return -1
-    if (b.uid === currentUserId) return 1
-    return a.name.localeCompare(b.name)
-  })
+  const orderedPlayers = [...players]
+    .filter((player) =>
+      !selectedWeek ||
+      playerParticipatedInWeek(
+        player,
+        selectedWeek.week,
+      ),
+    )
+    .sort((a, b) => {
+      if (a.uid === currentUserId) return -1
+      if (b.uid === currentUserId) return 1
+      return a.name.localeCompare(b.name)
+    })
 
   const historyPlayerColumnWidth = 86
   const historyGameColumnWidth = 142
@@ -3413,6 +3457,9 @@ function SettingsPage({
   onCreateLeague,
   onJoinLeague,
   onSwitchLeague,
+  onPromoteMember,
+  onDemoteMember,
+  onRemoveMember,
 }: {
   user: User
   isAdmin: boolean
@@ -3424,6 +3471,9 @@ function SettingsPage({
   onCreateLeague: (leagueName: string) => Promise<League>
   onJoinLeague: (joinCode: string) => Promise<League>
   onSwitchLeague: (leagueId: string) => void
+  onPromoteMember: (userId: string) => Promise<void>
+  onDemoteMember: (userId: string) => Promise<void>
+  onRemoveMember: (userId: string) => Promise<void>
 }) {
   const [newLeagueName, setNewLeagueName] = useState('')
   const [joinCode, setJoinCode] = useState('')
@@ -3432,6 +3482,8 @@ function SettingsPage({
   const [leagueMessage, setLeagueMessage] = useState('')
   const [leagueError, setLeagueError] = useState('')
   const [inviteMessage, setInviteMessage] = useState('')
+  const [memberActionUserId, setMemberActionUserId] =
+    useState<string | null>(null)
 
   async function handleSignOut() {
     await signOut(auth)
@@ -3577,6 +3629,121 @@ function SettingsPage({
           `Join code: ${activeLeague.joinCode}`,
         )
       }
+    }
+  }
+
+  const activeAdmins =
+    leaguePlayers.filter(
+      (player) =>
+        player.active !== false &&
+        player.role === 'admin',
+    )
+
+  async function changeMemberRole(
+    player: LeaguePlayer,
+    nextRole: LeagueRole,
+  ) {
+    if (
+      player.role === 'admin' &&
+      nextRole === 'player' &&
+      activeAdmins.length <= 1
+    ) {
+      setLeagueError(
+        'A league must always have at least one admin.',
+      )
+      return
+    }
+
+    const confirmed =
+      window.confirm(
+        `${nextRole === 'admin' ? 'Promote' : 'Demote'} ${player.name} ${
+          nextRole === 'admin'
+            ? 'to league admin'
+            : 'to player'
+        }?`,
+      )
+
+    if (!confirmed) return
+
+    setLeagueError('')
+    setLeagueMessage('')
+    setMemberActionUserId(
+      player.uid,
+    )
+
+    try {
+      if (nextRole === 'admin') {
+        await onPromoteMember(
+          player.uid,
+        )
+        setLeagueMessage(
+          `${player.name} is now an admin.`,
+        )
+      } else {
+        await onDemoteMember(
+          player.uid,
+        )
+        setLeagueMessage(
+          `${player.name} is now a player.`,
+        )
+      }
+    } catch (error) {
+      console.error(error)
+
+      setLeagueError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to update that member.',
+      )
+    } finally {
+      setMemberActionUserId(null)
+    }
+  }
+
+  async function removeMember(
+    player: LeaguePlayer,
+  ) {
+    if (
+      player.role === 'admin' &&
+      activeAdmins.length <= 1
+    ) {
+      setLeagueError(
+        'The last league admin cannot be removed.',
+      )
+      return
+    }
+
+    const confirmed =
+      window.confirm(
+        `Remove ${player.name} from ${activeLeague.name}? Their prior picks and results will stay in league history.`,
+      )
+
+    if (!confirmed) return
+
+    setLeagueError('')
+    setLeagueMessage('')
+    setMemberActionUserId(
+      player.uid,
+    )
+
+    try {
+      await onRemoveMember(
+        player.uid,
+      )
+
+      setLeagueMessage(
+        `${player.name} was removed from future league participation.`,
+      )
+    } catch (error) {
+      console.error(error)
+
+      setLeagueError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to remove that member.',
+      )
+    } finally {
+      setMemberActionUserId(null)
     }
   }
 
@@ -3806,6 +3973,10 @@ function SettingsPage({
             }}
           >
             {leaguePlayers
+              .filter(
+                (player) =>
+                  player.active !== false,
+              )
               .slice()
               .sort((a, b) => {
                 if (
@@ -3830,27 +4001,34 @@ function SettingsPage({
                 )
               })
               .map(
-                (player, index) => (
+                (
+                  player,
+                  index,
+                  activePlayers,
+                ) => (
                   <div
                     key={player.uid}
                     style={{
-                      display: 'flex',
-                      justifyContent:
-                        'space-between',
-                      gap: 12,
-                      alignItems:
-                        'center',
                       padding:
                         '11px 12px',
                       borderBottom:
                         index ===
-                        leaguePlayers.length -
+                        activePlayers.length -
                           1
                           ? 'none'
                           : '1px solid #edf0f5',
                     }}
                   >
-                    <div>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent:
+                          'space-between',
+                        gap: 12,
+                        alignItems:
+                          'center',
+                      }}
+                    >
                       <strong>
                         {player.name}
                         {player.uid ===
@@ -3858,29 +4036,239 @@ function SettingsPage({
                           ? ' (You)'
                           : ''}
                       </strong>
+
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 800,
+                          textTransform:
+                            'uppercase',
+                          letterSpacing:
+                            '.04em',
+                          color:
+                            'var(--theme-muted, #64748b)',
+                        }}
+                      >
+                        {player.role ===
+                        'admin'
+                          ? 'Admin'
+                          : 'Player'}
+                      </span>
                     </div>
 
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 800,
-                        textTransform:
-                          'uppercase',
-                        letterSpacing:
-                          '.04em',
-                        color:
-                          'var(--theme-muted, #64748b)',
-                      }}
-                    >
-                      {player.role ===
-                      'admin'
-                        ? 'Admin'
-                        : 'Player'}
-                    </span>
+                    {isAdmin && (
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          gap: 7,
+                          marginTop: 9,
+                        }}
+                      >
+                        {player.role ===
+                        'player' ? (
+                          <button
+                            type="button"
+                            disabled={
+                              memberActionUserId !==
+                              null
+                            }
+                            onClick={() =>
+                              changeMemberRole(
+                                player,
+                                'admin',
+                              )
+                            }
+                            style={{
+                              padding:
+                                '7px 10px',
+                              border:
+                                '1px solid #cbd5e1',
+                              borderRadius: 8,
+                              background:
+                                'transparent',
+                              color:
+                                'inherit',
+                              font: 'inherit',
+                              fontSize: 12,
+                              fontWeight: 800,
+                              cursor:
+                                'pointer',
+                            }}
+                          >
+                            Promote to Admin
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={
+                              memberActionUserId !==
+                                null ||
+                              activeAdmins.length <=
+                                1
+                            }
+                            onClick={() =>
+                              changeMemberRole(
+                                player,
+                                'player',
+                              )
+                            }
+                            style={{
+                              padding:
+                                '7px 10px',
+                              border:
+                                '1px solid #cbd5e1',
+                              borderRadius: 8,
+                              background:
+                                'transparent',
+                              color:
+                                'inherit',
+                              font: 'inherit',
+                              fontSize: 12,
+                              fontWeight: 800,
+                              cursor:
+                                activeAdmins.length <=
+                                1
+                                  ? 'not-allowed'
+                                  : 'pointer',
+                            }}
+                          >
+                            Demote to Player
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          disabled={
+                            memberActionUserId !==
+                              null ||
+                            (player.role ===
+                              'admin' &&
+                              activeAdmins.length <=
+                                1)
+                          }
+                          onClick={() =>
+                            removeMember(
+                              player,
+                            )
+                          }
+                          style={{
+                            padding:
+                              '7px 10px',
+                            border:
+                              '1px solid #cbd5e1',
+                            borderRadius: 8,
+                            background:
+                              'transparent',
+                            color: 'inherit',
+                            font: 'inherit',
+                            fontSize: 12,
+                            fontWeight: 800,
+                            cursor:
+                              player.role ===
+                                'admin' &&
+                              activeAdmins.length <=
+                                1
+                                ? 'not-allowed'
+                                : 'pointer',
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ),
               )}
           </div>
+
+          {leaguePlayers.some(
+            (player) =>
+              player.active === false,
+          ) && (
+            <div
+              style={{
+                marginTop: 14,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 800,
+                  textTransform:
+                    'uppercase',
+                  letterSpacing:
+                    '.04em',
+                  color:
+                    'var(--theme-muted, #64748b)',
+                  marginBottom: 6,
+                }}
+              >
+                Former members
+              </div>
+
+              <div
+                style={{
+                  border:
+                    '1px solid #d9e0ea',
+                  borderRadius: 10,
+                  overflow: 'hidden',
+                }}
+              >
+                {leaguePlayers
+                  .filter(
+                    (player) =>
+                      player.active ===
+                      false,
+                  )
+                  .map(
+                    (
+                      player,
+                      index,
+                      formerPlayers,
+                    ) => (
+                      <div
+                        key={
+                          player.uid
+                        }
+                        style={{
+                          display:
+                            'flex',
+                          justifyContent:
+                            'space-between',
+                          gap: 12,
+                          padding:
+                            '10px 12px',
+                          borderBottom:
+                            index ===
+                            formerPlayers.length -
+                              1
+                              ? 'none'
+                              : '1px solid #edf0f5',
+                        }}
+                      >
+                        <span>
+                          {player.name}
+                        </span>
+
+                        <span
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 800,
+                            textTransform:
+                              'uppercase',
+                            color:
+                              'var(--theme-muted, #64748b)',
+                          }}
+                        >
+                          Removed
+                        </span>
+                      </div>
+                    ),
+                  )}
+              </div>
+            </div>
+          )}
         </div>
 
         <form
@@ -4456,7 +4844,6 @@ function App() {
   const [currentWeek, setCurrentWeek] = useState<Week>(DEFAULT_WEEK)
   const [seasonWeeks, setSeasonWeeks] = useState<SeasonWeekData[]>([])
   const [gamesRefreshKey, setGamesRefreshKey] = useState(0)
-  const [leaguesRefreshKey, setLeaguesRefreshKey] = useState(0)
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
@@ -4546,30 +4933,61 @@ function App() {
         }[] = []
 
         for (const leagueId of candidateLeagueIds) {
-          const membershipSnapshot = await getDoc(
-            doc(
-              db,
-              'leagues',
-              leagueId,
-              'members',
-              currentUser.uid,
-            ),
-          )
+          let membershipSnapshot
+
+          try {
+            membershipSnapshot = await getDoc(
+              doc(
+                db,
+                'leagues',
+                leagueId,
+                'members',
+                currentUser.uid,
+              ),
+            )
+          } catch (error) {
+            /*
+             * A removed member's membership document still exists,
+             * but Firestore correctly blocks that inactive user from
+             * reading it. Skip only that league instead of aborting the
+             * user's entire league list.
+             */
+            console.info(
+              `Skipping inaccessible league membership ${leagueId}.`,
+              error,
+            )
+            continue
+          }
 
           if (!membershipSnapshot.exists()) {
             continue
           }
 
-          const leagueSnapshot = await getDoc(
-            doc(db, 'leagues', leagueId),
-          )
+          const membershipData = membershipSnapshot.data()
+
+          if (membershipData.active === false) {
+            continue
+          }
+
+          let leagueSnapshot
+
+          try {
+            leagueSnapshot = await getDoc(
+              doc(db, 'leagues', leagueId),
+            )
+          } catch (error) {
+            console.info(
+              `Skipping inaccessible league ${leagueId}.`,
+              error,
+            )
+            continue
+          }
 
           if (!leagueSnapshot.exists()) {
             continue
           }
 
           const leagueData = leagueSnapshot.data()
-          const membershipData = membershipSnapshot.data()
 
           memberships.push({
             league: {
@@ -4639,7 +5057,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [user, leaguesRefreshKey])
+  }, [user])
 
   useEffect(() => {
     if (!user || !activeLeague) {
@@ -4739,15 +5157,24 @@ function App() {
           ),
         )
 
-        const memberRoles = new Map(
+        const memberDetails = new Map(
           leagueMembersSnapshot.docs.map((memberDocument) => {
             const data = memberDocument.data()
 
             return [
               String(data.userId ?? memberDocument.id),
-              data.role === 'admin'
-                ? 'admin'
-                : 'player',
+              {
+                role:
+                  data.role === 'admin'
+                    ? 'admin'
+                    : 'player',
+                active:
+                  data.active !== false,
+                activeThroughWeekNumber:
+                  typeof data.activeThroughWeekNumber === 'number'
+                    ? data.activeThroughWeekNumber
+                    : null,
+              },
             ] as const
           }),
         )
@@ -4771,6 +5198,11 @@ function App() {
                 ? data.name.trim()
                 : ''
 
+            const membership =
+              memberDetails.get(
+                userDocument.id,
+              )
+
             return {
               uid: userDocument.id,
               name:
@@ -4778,9 +5210,14 @@ function App() {
                 savedName ||
                 fallbackName,
               role:
-                memberRoles.get(
-                  userDocument.id,
-                ) ?? 'player',
+                membership?.role ??
+                'player',
+              active:
+                membership?.active ??
+                true,
+              activeThroughWeekNumber:
+                membership?.activeThroughWeekNumber ??
+                null,
             }
           })
           .sort((a, b) => a.name.localeCompare(b.name))
@@ -5258,6 +5695,7 @@ function App() {
       {
         userId: user.uid,
         role: 'admin',
+        active: true,
         joinedAt:
           serverTimestamp(),
       },
@@ -5336,9 +5774,6 @@ function App() {
     )
 
     setActiveLeague(league)
-    setLeaguesRefreshKey(
-      (value) => value + 1,
-    )
 
     return league
   }
@@ -5447,6 +5882,7 @@ function App() {
           {
             userId: user.uid,
             role: 'player',
+            active: true,
             inviteId: joinCode,
             joinedAt:
               serverTimestamp(),
@@ -5563,11 +5999,197 @@ function App() {
     )
 
     setActiveLeague(league)
-    setLeaguesRefreshKey(
-      (value) => value + 1,
-    )
 
     return league
+  }
+
+  async function updateMemberRole(
+    memberUserId: string,
+    role: LeagueRole,
+  ) {
+    if (
+      !user ||
+      !activeLeague ||
+      !isAdmin
+    ) {
+      throw new Error(
+        'League admin access is required.',
+      )
+    }
+
+    const activeAdmins =
+      leaguePlayers.filter(
+        (player) =>
+          player.active !== false &&
+          player.role === 'admin',
+      )
+
+    const target =
+      leaguePlayers.find(
+        (player) =>
+          player.uid === memberUserId,
+      )
+
+    if (!target) {
+      throw new Error(
+        'That league member could not be found.',
+      )
+    }
+
+    if (
+      target.role === 'admin' &&
+      role === 'player' &&
+      activeAdmins.length <= 1
+    ) {
+      throw new Error(
+        'A league must always have at least one admin.',
+      )
+    }
+
+    await setDoc(
+      doc(
+        db,
+        'leagues',
+        activeLeague.id,
+        'members',
+        memberUserId,
+      ),
+      {
+        role,
+        updatedAt:
+          serverTimestamp(),
+      },
+      {
+        merge: true,
+      },
+    )
+
+    setLeaguePlayers(
+      (current) =>
+        current.map(
+          (player) =>
+            player.uid ===
+            memberUserId
+              ? {
+                  ...player,
+                  role,
+                }
+              : player,
+        ),
+    )
+
+    if (
+      memberUserId === user.uid
+    ) {
+      setIsAdmin(
+        role === 'admin',
+      )
+    }
+  }
+
+  async function removeLeagueMember(
+    memberUserId: string,
+  ) {
+    if (
+      !user ||
+      !activeLeague ||
+      !isAdmin
+    ) {
+      throw new Error(
+        'League admin access is required.',
+      )
+    }
+
+    const activeAdmins =
+      leaguePlayers.filter(
+        (player) =>
+          player.active !== false &&
+          player.role === 'admin',
+      )
+
+    const target =
+      leaguePlayers.find(
+        (player) =>
+          player.uid === memberUserId,
+      )
+
+    if (!target) {
+      throw new Error(
+        'That league member could not be found.',
+      )
+    }
+
+    if (
+      target.role === 'admin' &&
+      activeAdmins.length <= 1
+    ) {
+      throw new Error(
+        'The last league admin cannot be removed.',
+      )
+    }
+
+    await setDoc(
+      doc(
+        db,
+        'leagues',
+        activeLeague.id,
+        'members',
+        memberUserId,
+      ),
+      {
+        active: false,
+        activeThroughWeekNumber:
+          currentWeek.weekNumber,
+        removedAt:
+          serverTimestamp(),
+        removedBy:
+          user.uid,
+      },
+      {
+        merge: true,
+      },
+    )
+
+    setLeaguePlayers(
+      (current) =>
+        current.map(
+          (player) =>
+            player.uid ===
+            memberUserId
+              ? {
+                  ...player,
+                  active: false,
+                  activeThroughWeekNumber:
+                    currentWeek.weekNumber,
+                }
+              : player,
+        ),
+    )
+
+    if (
+      memberUserId === user.uid
+    ) {
+      setAvailableLeagues(
+        (current) =>
+          current.filter(
+            (league) =>
+              league.id !==
+              activeLeague.id,
+          ),
+      )
+
+      const nextLeague =
+        availableLeagues.find(
+          (league) =>
+            league.id !==
+            activeLeague.id,
+        ) ?? null
+
+      setActiveLeague(
+        nextLeague,
+      )
+      setIsAdmin(false)
+    }
   }
 
   async function clearLeagueDraftSelections(leagueId: string) {
@@ -5945,13 +6567,22 @@ function App() {
       ]
     : regularTabs
 
+  const currentWeekPlayers =
+    leaguePlayers.filter(
+      (player) =>
+        playerParticipatedInWeek(
+          player,
+          currentWeek,
+        ),
+    )
+
   let page
 
   if (activeTab === 'home') {
     page = (
       <HomePage
         currentUserId={user.uid}
-        players={leaguePlayers}
+        players={currentWeekPlayers}
         games={games}
         picksMade={Object.keys(picks).length}
         totalGames={games.length}
@@ -6006,6 +6637,19 @@ function App() {
         onCreateLeague={createLeague}
         onJoinLeague={joinLeague}
         onSwitchLeague={switchLeague}
+        onPromoteMember={(userId) =>
+          updateMemberRole(
+            userId,
+            'admin',
+          )
+        }
+        onDemoteMember={(userId) =>
+          updateMemberRole(
+            userId,
+            'player',
+          )
+        }
+        onRemoveMember={removeLeagueMember}
       />
     )
   } else if (
@@ -6028,7 +6672,7 @@ function App() {
     page = (
       <HomePage
         currentUserId={user.uid}
-        players={leaguePlayers}
+        players={currentWeekPlayers}
         games={games}
         picksMade={Object.keys(picks).length}
         totalGames={games.length}
