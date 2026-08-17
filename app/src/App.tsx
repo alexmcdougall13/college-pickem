@@ -85,6 +85,10 @@ type LeaguePlayer = {
   role?: LeagueRole
   active?: boolean
   activeThroughWeekNumber?: number | null
+  inactivePeriods?: {
+    startWeekNumber: number
+    endWeekNumber: number
+  }[]
 }
 
 type LeagueRole = 'admin' | 'player'
@@ -176,6 +180,21 @@ function playerParticipatedInWeek(
   player: LeaguePlayer,
   week: Week,
 ) {
+  const inactivePeriods =
+    player.inactivePeriods ?? []
+
+  if (
+    inactivePeriods.some(
+      (period) =>
+        week.weekNumber >=
+          period.startWeekNumber &&
+        week.weekNumber <=
+          period.endWeekNumber,
+    )
+  ) {
+    return false
+  }
+
   if (player.active !== false) {
     return true
   }
@@ -3460,6 +3479,7 @@ function SettingsPage({
   onPromoteMember,
   onDemoteMember,
   onRemoveMember,
+  onReinstateMember,
 }: {
   user: User
   isAdmin: boolean
@@ -3474,6 +3494,7 @@ function SettingsPage({
   onPromoteMember: (userId: string) => Promise<void>
   onDemoteMember: (userId: string) => Promise<void>
   onRemoveMember: (userId: string) => Promise<void>
+  onReinstateMember: (userId: string) => Promise<void>
 }) {
   const [newLeagueName, setNewLeagueName] = useState('')
   const [joinCode, setJoinCode] = useState('')
@@ -3741,6 +3762,43 @@ function SettingsPage({
         error instanceof Error
           ? error.message
           : 'Unable to remove that member.',
+      )
+    } finally {
+      setMemberActionUserId(null)
+    }
+  }
+
+  async function reinstateMember(
+    player: LeaguePlayer,
+  ) {
+    const confirmed =
+      window.confirm(
+        `Reinstate ${player.name} in ${activeLeague.name}? They will be able to make picks again beginning with the current week.`,
+      )
+
+    if (!confirmed) return
+
+    setLeagueError('')
+    setLeagueMessage('')
+    setMemberActionUserId(
+      player.uid,
+    )
+
+    try {
+      await onReinstateMember(
+        player.uid,
+      )
+
+      setLeagueMessage(
+        `${player.name} was reinstated.`,
+      )
+    } catch (error) {
+      console.error(error)
+
+      setLeagueError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to reinstate that member.',
       )
     } finally {
       setMemberActionUserId(null)
@@ -4232,11 +4290,6 @@ function SettingsPage({
                           player.uid
                         }
                         style={{
-                          display:
-                            'flex',
-                          justifyContent:
-                            'space-between',
-                          gap: 12,
                           padding:
                             '10px 12px',
                           borderBottom:
@@ -4247,22 +4300,67 @@ function SettingsPage({
                               : '1px solid #edf0f5',
                         }}
                       >
-                        <span>
-                          {player.name}
-                        </span>
-
-                        <span
+                        <div
                           style={{
-                            fontSize: 11,
-                            fontWeight: 800,
-                            textTransform:
-                              'uppercase',
-                            color:
-                              'var(--theme-muted, #64748b)',
+                            display:
+                              'flex',
+                            justifyContent:
+                              'space-between',
+                            gap: 12,
+                            alignItems:
+                              'center',
                           }}
                         >
-                          Removed
-                        </span>
+                          <span>
+                            {player.name}
+                          </span>
+
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 800,
+                              textTransform:
+                                'uppercase',
+                              color:
+                                'var(--theme-muted, #64748b)',
+                            }}
+                          >
+                            Removed
+                          </span>
+                        </div>
+
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            disabled={
+                              memberActionUserId !==
+                              null
+                            }
+                            onClick={() =>
+                              reinstateMember(
+                                player,
+                              )
+                            }
+                            style={{
+                              marginTop: 8,
+                              padding:
+                                '7px 10px',
+                              border:
+                                '1px solid #cbd5e1',
+                              borderRadius: 8,
+                              background:
+                                'transparent',
+                              color: 'inherit',
+                              font: 'inherit',
+                              fontSize: 12,
+                              fontWeight: 800,
+                              cursor:
+                                'pointer',
+                            }}
+                          >
+                            Reinstate
+                          </button>
+                        )}
                       </div>
                     ),
                   )}
@@ -5174,6 +5272,20 @@ function App() {
                   typeof data.activeThroughWeekNumber === 'number'
                     ? data.activeThroughWeekNumber
                     : null,
+                inactivePeriods:
+                  Array.isArray(data.inactivePeriods)
+                    ? data.inactivePeriods
+                        .filter(
+                          (period) =>
+                            period &&
+                            typeof period.startWeekNumber === 'number' &&
+                            typeof period.endWeekNumber === 'number',
+                        )
+                        .map((period) => ({
+                          startWeekNumber: period.startWeekNumber,
+                          endWeekNumber: period.endWeekNumber,
+                        }))
+                    : [],
               },
             ] as const
           }),
@@ -5218,6 +5330,9 @@ function App() {
               activeThroughWeekNumber:
                 membership?.activeThroughWeekNumber ??
                 null,
+              inactivePeriods:
+                membership?.inactivePeriods ??
+                [],
             }
           })
           .sort((a, b) => a.name.localeCompare(b.name))
@@ -6192,6 +6307,106 @@ function App() {
     }
   }
 
+  async function reinstateLeagueMember(
+    memberUserId: string,
+  ) {
+    if (
+      !user ||
+      !activeLeague ||
+      !isAdmin
+    ) {
+      throw new Error(
+        'League admin access is required.',
+      )
+    }
+
+    const target =
+      leaguePlayers.find(
+        (player) =>
+          player.uid === memberUserId,
+      )
+
+    if (!target) {
+      throw new Error(
+        'That league member could not be found.',
+      )
+    }
+
+    if (target.active !== false) {
+      return
+    }
+
+    const inactivePeriods =
+      target.inactivePeriods ?? []
+
+    const lastActiveWeek =
+      typeof target.activeThroughWeekNumber ===
+      'number'
+        ? target.activeThroughWeekNumber
+        : currentWeek.weekNumber - 1
+
+    const gapStart =
+      lastActiveWeek + 1
+
+    const gapEnd =
+      currentWeek.weekNumber - 1
+
+    const nextInactivePeriods =
+      gapStart <= gapEnd
+        ? [
+            ...inactivePeriods,
+            {
+              startWeekNumber:
+                gapStart,
+              endWeekNumber:
+                gapEnd,
+            },
+          ]
+        : inactivePeriods
+
+    await setDoc(
+      doc(
+        db,
+        'leagues',
+        activeLeague.id,
+        'members',
+        memberUserId,
+      ),
+      {
+        active: true,
+        activeThroughWeekNumber:
+          null,
+        inactivePeriods:
+          nextInactivePeriods,
+        reinstatedAt:
+          serverTimestamp(),
+        reinstatedBy:
+          user.uid,
+      },
+      {
+        merge: true,
+      },
+    )
+
+    setLeaguePlayers(
+      (current) =>
+        current.map(
+          (player) =>
+            player.uid ===
+            memberUserId
+              ? {
+                  ...player,
+                  active: true,
+                  activeThroughWeekNumber:
+                    null,
+                  inactivePeriods:
+                    nextInactivePeriods,
+                }
+              : player,
+        ),
+    )
+  }
+
   async function clearLeagueDraftSelections(leagueId: string) {
     const draftSnapshot = await getDocs(
       collection(
@@ -6650,6 +6865,7 @@ function App() {
           )
         }
         onRemoveMember={removeLeagueMember}
+        onReinstateMember={reinstateLeagueMember}
       />
     )
   } else if (
