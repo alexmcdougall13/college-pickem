@@ -1,0 +1,56 @@
+name: Week Published Notification
+
+on:
+  workflow_dispatch:
+    inputs:
+      league_id:
+        description: 'League ID'
+        required: true
+
+      week_id:
+        description: 'Week ID'
+        required: true
+
+      week_label:
+        description: 'Week label'
+        required: true
+
+      exclude_user_id:
+        description: 'Publishing admin UID'
+        required: false
+        default: ''
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Send week-published notifications
+        env:
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
+          FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
+
+        run: |
+          node scripts/send-week-published-notification.mjs \
+            "${{ inputs.league_id }}" \
+            "${{ inputs.week_id }}" \
+            "${{ inputs.week_label }}" \
+            "${{ inputs.exclude_user_id }}"
