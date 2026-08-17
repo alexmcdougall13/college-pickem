@@ -2,20 +2,9 @@ name: Pick Reminder Notifications
 
 on:
   workflow_dispatch:
-    inputs:
-      reminder_window_minutes:
-        description: 'How far ahead to look for missing picks'
-        required: true
-        default: '100000'
 
-      test_mode:
-        description: 'Test without creating reminder markers'
-        required: true
-        type: choice
-        options:
-          - 'true'
-          - 'false'
-        default: 'true'
+  schedule:
+    - cron: '3,13,23,33,43,53 * * * *'
 
 jobs:
   remind:
@@ -44,7 +33,7 @@ jobs:
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
           FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
           FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
-          REMINDER_WINDOW_MINUTES: ${{ inputs.reminder_window_minutes }}
-          TEST_MODE: ${{ inputs.test_mode }}
+          REMINDER_WINDOW_MINUTES: '35'
+          TEST_MODE: 'false'
 
         run: node scripts/send-pick-reminders.mjs
