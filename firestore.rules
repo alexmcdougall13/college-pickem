@@ -1,0 +1,504 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =========================================================
+    // Helpers
+    // =========================================================
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isPlatformOwner() {
+      return signedIn()
+        && request.auth.uid == 'qS0G8A8h13XJZdRtrm8cXidbIJd2';
+    }
+
+    // Temporary compatibility with the original single-league app.
+    function isLegacyAdmin() {
+      return signedIn()
+        && exists(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        )
+        && get(
+          /databases/$(database)/documents/users/$(request.auth.uid)
+        ).data.isAdmin == true;
+    }
+
+    function isLeagueMember(leagueId) {
+      return signedIn()
+        && exists(
+          /databases/$(database)/documents/leagues/$(leagueId)/members/$(request.auth.uid)
+        )
+        && (
+          !(
+            'active' in get(
+              /databases/$(database)/documents/leagues/$(leagueId)/members/$(request.auth.uid)
+            ).data
+          )
+          || get(
+            /databases/$(database)/documents/leagues/$(leagueId)/members/$(request.auth.uid)
+          ).data.active == true
+        );
+    }
+
+    function isLeagueAdmin(leagueId) {
+      return isLeagueMember(leagueId)
+        && get(
+          /databases/$(database)/documents/leagues/$(leagueId)/members/$(request.auth.uid)
+        ).data.role == 'admin';
+    }
+
+    function leagueGameHasNotStarted(leagueId, gameId) {
+      return get(
+        /databases/$(database)/documents/leagues/$(leagueId)/games/$(gameId)
+      ).data.kickoffTimestamp > request.time;
+    }
+
+    function leagueGameHasStarted(leagueId, gameId) {
+      return get(
+        /databases/$(database)/documents/leagues/$(leagueId)/games/$(gameId)
+      ).data.kickoffTimestamp <= request.time;
+    }
+
+    // Legacy game helpers.
+    function gameHasNotStarted(gameId) {
+      return get(
+        /databases/$(database)/documents/games/$(gameId)
+      ).data.kickoffTimestamp > request.time;
+    }
+
+    function gameHasStarted(gameId) {
+      return get(
+        /databases/$(database)/documents/games/$(gameId)
+      ).data.kickoffTimestamp <= request.time;
+    }
+
+
+    // =========================================================
+    // USERS
+    // =========================================================
+
+    match /users/{userId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+                    && request.auth.uid == userId;
+
+      allow update: if signedIn()
+                    && (
+                      (
+                        request.auth.uid == userId
+                        && (
+                          !resource.data.keys().hasAny(['isAdmin'])
+                          ||
+                          request.resource.data.isAdmin == resource.data.isAdmin
+                        )
+                      )
+                      ||
+                      (
+                        isPlatformOwner()
+                        && request.resource.data
+                          .diff(resource.data)
+                          .affectedKeys()
+                          .hasOnly(['leagueIds'])
+                      )
+                    );
+
+      allow delete: if false;
+
+      // -------------------------------------------------------
+      // NOTIFICATION REGISTRATIONS
+      // -------------------------------------------------------
+      //
+      // Each user may manage only the browser/device
+      // registrations stored beneath their own profile.
+
+      match /notificationRegistrations/{deviceId} {
+        allow read, create, update, delete: if signedIn()
+                                           && request.auth.uid == userId;
+      }
+    }
+
+
+    // =========================================================
+    // LEAGUE CREATION REQUESTS
+    // =========================================================
+    //
+    // A user may have one request document, keyed by their UID.
+    // Users may create a pending request and may submit a new
+    // request after rejection. Only the platform owner may review
+    // all requests or change a request to approved/rejected.
+
+    match /leagueRequests/{userId} {
+      allow get: if signedIn()
+                 && (
+                   request.auth.uid == userId
+                   || isPlatformOwner()
+                 );
+
+      allow list: if isPlatformOwner();
+
+      allow create: if signedIn()
+                    && request.auth.uid == userId
+                    && request.resource.data.userId == userId
+                    && request.resource.data.status == 'pending';
+
+      allow update: if signedIn()
+                    && (
+                      (
+                        request.auth.uid == userId
+                        && resource.data.userId == userId
+                        && request.resource.data.userId == userId
+                        && resource.data.status in ['rejected', 'approved']
+												&& request.resource.data.status == 'pending'
+                        && request.resource.data
+                          .diff(resource.data)
+                          .affectedKeys()
+                          .hasOnly([
+                            'userName',
+                            'leagueName',
+                            'status',
+                            'requestedAt',
+                            'updatedAt',
+                            'reviewedBy',
+                            'reviewedAt',
+  													'approvedLeagueId'
+                          ])
+                      )
+                      ||
+                      (
+                        isPlatformOwner()
+                        && resource.data.status == 'pending'
+                        && request.resource.data.userId == resource.data.userId
+                        && request.resource.data.leagueName == resource.data.leagueName
+                        && request.resource.data.status in ['approved', 'rejected']
+                      )
+                    );
+
+      allow delete: if false;
+    }
+
+
+    // =========================================================
+    // MULTI-LEAGUE STRUCTURE
+    // =========================================================
+
+    match /leagues/{leagueId} {
+
+      allow create: if isPlatformOwner()
+                    && request.resource.data.createdBy is string
+                    && request.resource.data.approvalStatus == 'approved'
+                    && request.resource.data.approvedBy == request.auth.uid
+                    && exists(
+                      /databases/$(database)/documents/leagueRequests/$(request.resource.data.createdBy)
+                    )
+                    && get(
+                      /databases/$(database)/documents/leagueRequests/$(request.resource.data.createdBy)
+                    ).data.status == 'pending'
+                    && get(
+                      /databases/$(database)/documents/leagueRequests/$(request.resource.data.createdBy)
+                    ).data.leagueName == request.resource.data.name;
+
+      allow read: if isLeagueMember(leagueId);
+
+      allow update: if isLeagueAdmin(leagueId);
+
+      allow delete: if false;
+
+
+      // -------------------------------------------------------
+      // MEMBERS
+      // -------------------------------------------------------
+
+      match /members/{userId} {
+        allow read: if isLeagueMember(leagueId);
+
+        allow create: if (
+          signedIn()
+          && userId == request.auth.uid
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.role == 'player'
+          && request.resource.data.inviteId is string
+          && exists(
+            /databases/$(database)/documents/leagueInvites/$(request.resource.data.inviteId)
+          )
+          && get(
+            /databases/$(database)/documents/leagueInvites/$(request.resource.data.inviteId)
+          ).data.leagueId == leagueId
+        )
+        || isLeagueAdmin(leagueId)
+        || (
+          isPlatformOwner()
+          && request.resource.data.userId == userId
+          && request.resource.data.role == 'admin'
+          && userId == get(
+            /databases/$(database)/documents/leagues/$(leagueId)
+          ).data.createdBy
+          && get(
+            /databases/$(database)/documents/leagues/$(leagueId)
+          ).data.approvedBy == request.auth.uid
+        );
+
+        // Admins may promote/demote members or soft-remove them.
+        // The member record's userId cannot be reassigned.
+        //
+        // Active members may also edit only their own league-specific
+        // displayName (plus updatedAt). They cannot change role, active
+        // status, participation history, or any other membership field.
+        allow update: if (
+          isLeagueAdmin(leagueId)
+          && request.resource.data.userId == resource.data.userId
+        )
+        || (
+          isLeagueMember(leagueId)
+          && userId == request.auth.uid
+          && request.resource.data.userId == resource.data.userId
+          && request.resource.data.displayName is string
+          && request.resource.data.displayName.size() > 0
+          && request.resource.data.displayName.size() <= 30
+          && request.resource.data
+            .diff(resource.data)
+            .affectedKeys()
+            .hasOnly([
+              'displayName',
+              'updatedAt'
+            ])
+        );
+
+        // Do not physically delete memberships. A removed member is
+        // retained with active == false so prior picks/results remain.
+        allow delete: if false;
+      }
+
+
+      // -------------------------------------------------------
+      // WEEKS
+      // -------------------------------------------------------
+
+      match /weeks/{weekId} {
+        allow read: if isLeagueMember(leagueId);
+
+        allow create: if isLeagueAdmin(leagueId)
+                      || (
+                        isPlatformOwner()
+                        && weekId == '2026-week-1'
+                        && get(
+                          /databases/$(database)/documents/leagues/$(leagueId)
+                        ).data.approvedBy == request.auth.uid
+                      );
+
+        allow update, delete: if isLeagueAdmin(leagueId);
+      }
+
+
+      // -------------------------------------------------------
+      // GAMES
+      // -------------------------------------------------------
+
+      match /games/{gameId} {
+        allow read: if isLeagueMember(leagueId);
+        allow create, update, delete: if isLeagueAdmin(leagueId);
+      }
+
+
+      // -------------------------------------------------------
+      // ADMIN DRAFT SELECTIONS
+      // -------------------------------------------------------
+      //
+      // ESPN's availableGames collection is shared globally.
+      // Each league stores its own selected games and tiebreaker
+      // here so changing one league does not affect another.
+      //
+      // Only admins of THIS league can access these documents.
+
+      match /draftSelections/{gameId} {
+        allow read, create, update, delete: if isLeagueAdmin(leagueId);
+      }
+
+
+      // -------------------------------------------------------
+      // PICKS
+      // -------------------------------------------------------
+
+      match /picks/{pickId} {
+        allow create: if isLeagueMember(leagueId)
+          && request.resource.data.userId == request.auth.uid
+          && leagueGameHasNotStarted(
+            leagueId,
+            request.resource.data.gameId
+          );
+
+        allow read: if isLeagueMember(leagueId)
+          && (
+            resource.data.userId == request.auth.uid
+            || leagueGameHasStarted(
+              leagueId,
+              resource.data.gameId
+            )
+          );
+
+        allow update: if isLeagueMember(leagueId)
+          && resource.data.userId == request.auth.uid
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.gameId == resource.data.gameId
+          && leagueGameHasNotStarted(
+            leagueId,
+            resource.data.gameId
+          );
+
+        allow delete: if false;
+      }
+
+
+      // -------------------------------------------------------
+      // TIEBREAKERS
+      // -------------------------------------------------------
+
+      match /tiebreakers/{tiebreakerId} {
+        allow create: if isLeagueMember(leagueId)
+          && request.resource.data.userId == request.auth.uid
+          && leagueGameHasNotStarted(
+            leagueId,
+            request.resource.data.gameId
+          );
+
+        allow read: if isLeagueMember(leagueId)
+          && (
+            resource.data.userId == request.auth.uid
+            || leagueGameHasStarted(
+              leagueId,
+              resource.data.gameId
+            )
+          );
+
+        allow update: if isLeagueMember(leagueId)
+          && resource.data.userId == request.auth.uid
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.gameId == resource.data.gameId
+          && leagueGameHasNotStarted(
+            leagueId,
+            resource.data.gameId
+          );
+
+        allow delete: if false;
+      }
+    }
+
+
+    // =========================================================
+    // LEAGUE INVITES
+    // =========================================================
+
+    match /leagueInvites/{inviteId} {
+      allow get: if signedIn();
+      allow list: if false;
+
+      allow create: if signedIn()
+        && request.resource.data.leagueId is string
+        && (
+          isLeagueAdmin(request.resource.data.leagueId)
+          ||
+          (
+            isPlatformOwner()
+            && get(
+              /databases/$(database)/documents/leagues/$(request.resource.data.leagueId)
+            ).data.approvedBy == request.auth.uid
+            && request.resource.data.createdBy == get(
+              /databases/$(database)/documents/leagues/$(request.resource.data.leagueId)
+            ).data.createdBy
+          )
+        );
+
+      allow update, delete: if signedIn()
+        && resource.data.leagueId is string
+        && isLeagueAdmin(resource.data.leagueId);
+    }
+
+
+    // =========================================================
+    // SHARED ESPN GAME FEED
+    // =========================================================
+    //
+    // availableGames is now only the global ESPN candidate feed.
+    //
+    // Any signed-in user may read it because any league could
+    // have its own admin.
+    //
+    // Browser clients cannot modify it. The GitHub ESPN sync uses
+    // Firebase Admin and therefore does not depend on these rules.
+
+    match /availableGames/{gameId} {
+      allow read: if signedIn();
+
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+
+    // =========================================================
+    // LEGACY COLLECTIONS
+    // =========================================================
+    //
+    // Keep these temporarily while we finish and verify the
+    // multi-league migration.
+    //
+    // The extra isLegacyAdmin() read permission on picks and
+    // tiebreakers is TEMPORARY for the migration.
+
+    match /picks/{pickId} {
+      allow create: if signedIn()
+                    && request.resource.data.userId == request.auth.uid
+                    && gameHasNotStarted(request.resource.data.gameId);
+
+      allow read: if signedIn()
+                  && (
+                    resource.data.userId == request.auth.uid
+                    || gameHasStarted(resource.data.gameId)
+                    || isLegacyAdmin()
+                  );
+
+      allow update: if signedIn()
+                    && resource.data.userId == request.auth.uid
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.gameId == resource.data.gameId
+                    && gameHasNotStarted(resource.data.gameId);
+
+      allow delete: if false;
+    }
+
+    match /tiebreakers/{tiebreakerId} {
+      allow create: if signedIn()
+                    && request.resource.data.userId == request.auth.uid
+                    && gameHasNotStarted(request.resource.data.gameId);
+
+      allow read: if signedIn()
+                  && (
+                    resource.data.userId == request.auth.uid
+                    || gameHasStarted(resource.data.gameId)
+                    || isLegacyAdmin()
+                  );
+
+      allow update: if signedIn()
+                    && resource.data.userId == request.auth.uid
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.gameId == resource.data.gameId
+                    && gameHasNotStarted(resource.data.gameId);
+
+      allow delete: if false;
+    }
+
+    match /games/{gameId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isLegacyAdmin();
+    }
+
+    match /weeks/{weekId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isLegacyAdmin();
+    }
+  }
+}
