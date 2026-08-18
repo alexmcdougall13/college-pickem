@@ -2,6 +2,20 @@ name: Pick Reminder Notifications
 
 on:
   workflow_dispatch:
+    inputs:
+      reminder_window_minutes:
+        description: 'Reminder window in minutes'
+        required: true
+        default: '35'
+
+      test_mode:
+        description: 'Ignore reminder markers for testing'
+        required: true
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+        default: 'false'
 
   schedule:
     - cron: '3,13,23,33,43,53 * * * *'
@@ -33,7 +47,7 @@ jobs:
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
           FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
           FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
-          REMINDER_WINDOW_MINUTES: '35'
-          TEST_MODE: 'false'
+          REMINDER_WINDOW_MINUTES: ${{ inputs.reminder_window_minutes || '35' }}
+          TEST_MODE: ${{ inputs.test_mode || 'false' }}
 
         run: node scripts/send-pick-reminders.mjs
