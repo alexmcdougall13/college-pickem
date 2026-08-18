@@ -35,6 +35,23 @@ type AuthMode = 'signin' | 'signup' | 'reset'
 
 type ThemePreference = 'light' | 'dark' | 'system'
 
+type NotificationPreferenceKey =
+  | 'weekPublished'
+  | 'pickReminders'
+  | 'weekResults'
+
+type NotificationPreferences = {
+  weekPublished: boolean
+  pickReminders: boolean
+  weekResults: boolean
+}
+
+const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
+  weekPublished: true,
+  pickReminders: true,
+  weekResults: true,
+}
+
 type Team = {
   id: string
   name: string
@@ -3567,6 +3584,9 @@ function SettingsPage({
   notificationsEnabled,
   notificationBusy,
   notificationMessage,
+  notificationPreferences,
+  notificationPreferenceBusy,
+  onNotificationPreferenceChange,
   onEnableNotifications,
   onDisableNotifications,
 }: {
@@ -3594,6 +3614,12 @@ function SettingsPage({
   notificationsEnabled: boolean
   notificationBusy: boolean
   notificationMessage: string
+  notificationPreferences: NotificationPreferences
+  notificationPreferenceBusy: NotificationPreferenceKey | null
+  onNotificationPreferenceChange: (
+    key: NotificationPreferenceKey,
+    enabled: boolean,
+  ) => Promise<void>
   onEnableNotifications: () => Promise<void>
   onDisableNotifications: () => Promise<void>
 }) {
@@ -4172,6 +4198,119 @@ function SettingsPage({
                 ? 'Browser permission is granted, but this device is not currently registered.'
                 : ''}
         </p>
+
+        <div
+          style={{
+            marginTop: 18,
+            paddingTop: 16,
+            borderTop:
+              '1px solid #edf0f5',
+          }}
+        >
+          <strong>
+            Notification types
+          </strong>
+
+          <p
+            style={{
+              margin: '5px 0 12px',
+              color:
+                'var(--theme-muted, #64748b)',
+              fontSize: 12,
+            }}
+          >
+            Choose which alerts you want to receive on enabled devices.
+          </p>
+
+          {[
+            {
+              key:
+                'weekPublished' as NotificationPreferenceKey,
+              title:
+                'New week published',
+              description:
+                'Get notified when a league admin publishes a new week.',
+            },
+            {
+              key:
+                'pickReminders' as NotificationPreferenceKey,
+              title:
+                'Missing pick reminders',
+              description:
+                'Get reminded before kickoff when picks or a tiebreaker are still missing.',
+            },
+            {
+              key:
+                'weekResults' as NotificationPreferenceKey,
+              title:
+                'Weekly results',
+              description:
+                'Get notified when a week finishes and final results are available.',
+            },
+          ].map((option) => (
+            <label
+              key={option.key}
+              style={{
+                display: 'flex',
+                justifyContent:
+                  'space-between',
+                alignItems:
+                  'center',
+                gap: 14,
+                padding:
+                  '11px 0',
+                borderBottom:
+                  '1px solid #edf0f5',
+              }}
+            >
+              <span>
+                <strong
+                  style={{
+                    display: 'block',
+                    fontSize: 13,
+                  }}
+                >
+                  {option.title}
+                </strong>
+
+                <small
+                  style={{
+                    display: 'block',
+                    marginTop: 3,
+                    color:
+                      'var(--theme-muted, #64748b)',
+                  }}
+                >
+                  {option.description}
+                </small>
+              </span>
+
+              <input
+                type="checkbox"
+                checked={
+                  notificationPreferences[
+                    option.key
+                  ]
+                }
+                disabled={
+                  notificationPreferenceBusy !==
+                  null
+                }
+                onChange={(event) =>
+                  onNotificationPreferenceChange(
+                    option.key,
+                    event.target.checked,
+                  )
+                }
+                style={{
+                  width: 20,
+                  height: 20,
+                  flex: '0 0 auto',
+                }}
+              />
+            </label>
+          ))}
+        </div>
 
         {notificationMessage && (
           <p
@@ -5598,6 +5737,16 @@ function App() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false)
   const [notificationBusy, setNotificationBusy] = useState(false)
   const [notificationMessage, setNotificationMessage] = useState('')
+  const [
+    notificationPreferences,
+    setNotificationPreferences,
+  ] = useState<NotificationPreferences>(
+    DEFAULT_NOTIFICATION_PREFERENCES,
+  )
+  const [
+    notificationPreferenceBusy,
+    setNotificationPreferenceBusy,
+  ] = useState<NotificationPreferenceKey | null>(null)
 
   function notificationDeviceId() {
     const storageKey =
@@ -5794,6 +5943,102 @@ function App() {
     )
 
     return messaging
+  }
+
+  useEffect(() => {
+    if (!user) {
+      setNotificationPreferences(
+        DEFAULT_NOTIFICATION_PREFERENCES,
+      )
+      return
+    }
+
+    let cancelled = false
+
+    async function loadNotificationPreferences() {
+      try {
+        const snapshot =
+          await getDoc(
+            doc(
+              db,
+              'users',
+              user!.uid,
+            ),
+          )
+
+        if (
+          cancelled ||
+          !snapshot.exists()
+        ) {
+          return
+        }
+
+        const saved =
+          snapshot.data()
+            .notificationPreferences
+
+        setNotificationPreferences({
+          weekPublished:
+            saved?.weekPublished !== false,
+          pickReminders:
+            saved?.pickReminders !== false,
+          weekResults:
+            saved?.weekResults !== false,
+        })
+      } catch (error) {
+        console.error(
+          'Unable to load notification preferences.',
+          error,
+        )
+      }
+    }
+
+    loadNotificationPreferences()
+
+    return () => {
+      cancelled = true
+    }
+  }, [user])
+
+  async function changeNotificationPreference(
+    key: NotificationPreferenceKey,
+    enabled: boolean,
+  ) {
+    if (!user) return
+
+    const next = {
+      ...notificationPreferences,
+      [key]: enabled,
+    }
+
+    setNotificationPreferenceBusy(
+      key,
+    )
+
+    try {
+      await setDoc(
+        doc(
+          db,
+          'users',
+          user.uid,
+        ),
+        {
+          notificationPreferences:
+            next,
+        },
+        {
+          merge: true,
+        },
+      )
+
+      setNotificationPreferences(
+        next,
+      )
+    } finally {
+      setNotificationPreferenceBusy(
+        null,
+      )
+    }
   }
 
   async function enableNotifications() {
@@ -8344,6 +8589,9 @@ function App() {
         notificationsEnabled={notificationsEnabled}
         notificationBusy={notificationBusy}
         notificationMessage={notificationMessage}
+        notificationPreferences={notificationPreferences}
+        notificationPreferenceBusy={notificationPreferenceBusy}
+        onNotificationPreferenceChange={changeNotificationPreference}
         onEnableNotifications={enableNotifications}
         onDisableNotifications={disableNotifications}
       />

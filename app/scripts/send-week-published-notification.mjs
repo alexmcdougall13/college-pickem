@@ -122,6 +122,24 @@ for (
     continue
   }
 
+  const userSnapshot =
+    await db
+      .collection('users')
+      .doc(userId)
+      .get()
+
+  if (
+    userSnapshot.exists &&
+    userSnapshot.data()
+      .notificationPreferences
+      ?.weekPublished === false
+  ) {
+    console.log(
+      `Skipping ${userId}: week-published notifications disabled.`,
+    )
+    continue
+  }
+
   const registrations =
     await db
       .collection('users')

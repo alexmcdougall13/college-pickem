@@ -79,6 +79,21 @@ function markerId(
 async function enabledFidsForUser(
   userId,
 ) {
+  const userSnapshot =
+    await db
+      .collection('users')
+      .doc(userId)
+      .get()
+
+  if (
+    userSnapshot.exists &&
+    userSnapshot.data()
+      .notificationPreferences
+      ?.pickReminders === false
+  ) {
+    return []
+  }
+
   const snapshot =
     await db
       .collection('users')
