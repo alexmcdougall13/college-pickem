@@ -106,6 +106,19 @@ type LeagueMembership = {
   role: LeagueRole
 }
 
+type LeagueRequestStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+
+type LeagueRequest = {
+  userId: string
+  userName: string
+  leagueName: string
+  status: LeagueRequestStatus
+  approvedLeagueId?: string
+}
+
 type HomePicks = Record<string, Record<string, string>>
 type HomeTiebreakers = Record<string, number>
 
@@ -132,6 +145,8 @@ type SeasonWeekData = {
 
 const SEASON = 2026
 const LEGACY_LEAGUE_ID = 'legacy-2026'
+const PLATFORM_OWNER_UID =
+  'qS0G8A8h13XJZdRtrm8cXidbIJd2'
 const ESPN_SYNC_WORKER_URL =
   'https://college-pickem-sync.alexmcdougall.workers.dev'
 
@@ -2932,6 +2947,68 @@ function AdminPage({
       )
 
       await batch.commit()
+
+      /*
+       * First publication only:
+       * notify the other active members that the week is ready.
+       * Republishing updated lines/games should not generate another push.
+       *
+       * Notification delivery is deliberately non-blocking. A failed push
+       * must never turn a successful Firestore publish into a failed publish.
+       */
+      if (!currentWeek.published) {
+        const publishingUser =
+          auth.currentUser
+
+        if (publishingUser) {
+          publishingUser
+            .getIdToken()
+            .then((token) =>
+              fetch(
+                `${ESPN_SYNC_WORKER_URL}/week-published`,
+                {
+                  method: 'POST',
+                  headers: {
+                    Authorization:
+                      `Bearer ${token}`,
+                    'Content-Type':
+                      'application/json',
+                  },
+                  body: JSON.stringify({
+                    leagueId,
+                    weekId:
+                      publishWeekId,
+                    weekLabel:
+                      publishWeekLabel,
+                  }),
+                },
+              ),
+            )
+            .then(async (response) => {
+              if (!response.ok) {
+                const result =
+                  await response
+                    .json()
+                    .catch(
+                      () => ({}),
+                    )
+
+                console.error(
+                  'Unable to queue week-published notification:',
+                  result?.error ??
+                    response.statusText,
+                )
+              }
+            })
+            .catch((error) => {
+              console.error(
+                'Unable to queue week-published notification:',
+                error,
+              )
+            })
+        }
+      }
+
       await onPublished()
 
       setPublishMessage(
@@ -3473,9 +3550,13 @@ function SettingsPage({
   leaguePlayers,
   themePreference,
   onThemePreferenceChange,
-  onCreateLeague,
+  onRequestLeague,
   onJoinLeague,
   onSwitchLeague,
+  leagueRequest,
+  platformLeagueRequests,
+  onApproveLeagueRequest,
+  onRejectLeagueRequest,
   onPromoteMember,
   onDemoteMember,
   onRemoveMember,
@@ -3495,9 +3576,13 @@ function SettingsPage({
   leaguePlayers: LeaguePlayer[]
   themePreference: ThemePreference
   onThemePreferenceChange: (theme: ThemePreference) => void
-  onCreateLeague: (leagueName: string) => Promise<League>
+  onRequestLeague: (leagueName: string) => Promise<void>
   onJoinLeague: (joinCode: string) => Promise<League>
   onSwitchLeague: (leagueId: string) => void
+  leagueRequest: LeagueRequest | null
+  platformLeagueRequests: LeagueRequest[]
+  onApproveLeagueRequest: (request: LeagueRequest) => Promise<void>
+  onRejectLeagueRequest: (request: LeagueRequest) => Promise<void>
   onPromoteMember: (userId: string) => Promise<void>
   onDemoteMember: (userId: string) => Promise<void>
   onRemoveMember: (userId: string) => Promise<void>
@@ -3524,7 +3609,7 @@ function SettingsPage({
     await signOut(auth)
   }
 
-  async function handleCreateLeague(
+  async function handleRequestLeague(
     event: React.FormEvent,
   ) {
     event.preventDefault()
@@ -3542,14 +3627,13 @@ function SettingsPage({
     setLeagueMessage('')
 
     try {
-      const league =
-        await onCreateLeague(
-          leagueName,
-        )
+      await onRequestLeague(
+        leagueName,
+      )
 
       setNewLeagueName('')
       setLeagueMessage(
-        `${league.name} created. Join code: ${league.joinCode}`,
+        `${leagueName} was submitted for approval.`,
       )
     } catch (error) {
       console.error(error)
@@ -3557,7 +3641,7 @@ function SettingsPage({
       setLeagueError(
         error instanceof Error
           ? error.message
-          : 'Unable to create the league.',
+          : 'Unable to request the league.',
       )
     } finally {
       setLeagueAction(null)
@@ -4514,7 +4598,7 @@ function SettingsPage({
         </div>
 
         <form
-          onSubmit={handleCreateLeague}
+          onSubmit={handleRequestLeague}
           style={{
             marginTop: 20,
           }}
@@ -4524,8 +4608,42 @@ function SettingsPage({
               marginBottom: 8,
             }}
           >
-            Create a league
+            Request a new league
           </h3>
+
+          {leagueRequest?.status === 'pending' && (
+            <div
+              style={{
+                marginBottom: 10,
+                padding: 12,
+                border: '1px solid #d9e0ea',
+                borderRadius: 10,
+              }}
+            >
+              <strong>Pending approval</strong>
+              <p
+                style={{
+                  margin: '5px 0 0',
+                  fontSize: 12,
+                  color: 'var(--theme-muted, #64748b)',
+                }}
+              >
+                {leagueRequest.leagueName} is waiting for approval.
+              </p>
+            </div>
+          )}
+
+          {leagueRequest?.status === 'rejected' && (
+            <p
+              style={{
+                margin: '0 0 10px',
+                fontSize: 12,
+                color: 'var(--theme-muted, #64748b)',
+              }}
+            >
+              Your last request was not approved. You may submit a new request.
+            </p>
+          )}
 
           <input
             type="text"
@@ -4538,7 +4656,8 @@ function SettingsPage({
             placeholder="League name"
             maxLength={50}
             disabled={
-              leagueAction !== null
+              leagueAction !== null ||
+              leagueRequest?.status === 'pending'
             }
             style={{
               width: '100%',
@@ -4555,7 +4674,8 @@ function SettingsPage({
           <button
             type="submit"
             disabled={
-              leagueAction !== null
+              leagueAction !== null ||
+              leagueRequest?.status === 'pending'
             }
             style={{
               width: '100%',
@@ -4565,15 +4685,175 @@ function SettingsPage({
               borderRadius: 10,
               font: 'inherit',
               fontWeight: 800,
-              cursor: 'pointer',
+              cursor:
+                leagueRequest?.status === 'pending'
+                  ? 'not-allowed'
+                  : 'pointer',
             }}
           >
-            {leagueAction ===
-            'create'
-              ? 'Creating…'
-              : 'Create League'}
+            {leagueAction === 'create'
+              ? 'Submitting…'
+              : leagueRequest?.status === 'pending'
+                ? 'Pending Approval'
+                : 'Request League'}
           </button>
         </form>
+
+        {user.uid === PLATFORM_OWNER_UID && (
+          <div
+            style={{
+              marginTop: 22,
+              paddingTop: 18,
+              borderTop: '1px solid #edf0f5',
+            }}
+          >
+            <h3
+              style={{
+                marginBottom: 8,
+              }}
+            >
+              League Requests
+            </h3>
+
+            {platformLeagueRequests.length === 0 ? (
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 12,
+                  color: 'var(--theme-muted, #64748b)',
+                }}
+              >
+                No league requests are waiting for approval.
+              </p>
+            ) : (
+              <div
+                style={{
+                  border: '1px solid #d9e0ea',
+                  borderRadius: 10,
+                  overflow: 'hidden',
+                }}
+              >
+                {platformLeagueRequests.map(
+                  (request, index) => (
+                    <div
+                      key={request.userId}
+                      style={{
+                        padding: 12,
+                        borderBottom:
+                          index === platformLeagueRequests.length - 1
+                            ? 'none'
+                            : '1px solid #edf0f5',
+                      }}
+                    >
+                      <strong>{request.leagueName}</strong>
+                      <p
+                        style={{
+                          margin: '4px 0 0',
+                          fontSize: 12,
+                          color: 'var(--theme-muted, #64748b)',
+                        }}
+                      >
+                        Requested by {request.userName}
+                      </p>
+
+                      <div
+                        style={{
+                          display: 'flex',
+                          gap: 8,
+                          marginTop: 9,
+                        }}
+                      >
+                        <button
+                          type="button"
+                          disabled={leagueAction !== null}
+                          onClick={async () => {
+                            setLeagueAction('create')
+                            setLeagueError('')
+                            setLeagueMessage('')
+
+                            try {
+                              await onApproveLeagueRequest(request)
+                              setLeagueMessage(
+                                `${request.leagueName} approved.`,
+                              )
+                            } catch (error) {
+                              console.error(error)
+                              setLeagueError(
+                                error instanceof Error
+                                  ? error.message
+                                  : 'Unable to approve that request.',
+                              )
+                            } finally {
+                              setLeagueAction(null)
+                            }
+                          }}
+                          style={{
+                            padding: '8px 10px',
+                            border: 0,
+                            borderRadius: 8,
+                            font: 'inherit',
+                            fontSize: 12,
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Approve
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={leagueAction !== null}
+                          onClick={async () => {
+                            if (
+                              !window.confirm(
+                                `Reject ${request.leagueName}?`,
+                              )
+                            ) {
+                              return
+                            }
+
+                            setLeagueAction('create')
+                            setLeagueError('')
+                            setLeagueMessage('')
+
+                            try {
+                              await onRejectLeagueRequest(request)
+                              setLeagueMessage(
+                                `${request.leagueName} rejected.`,
+                              )
+                            } catch (error) {
+                              console.error(error)
+                              setLeagueError(
+                                error instanceof Error
+                                  ? error.message
+                                  : 'Unable to reject that request.',
+                              )
+                            } finally {
+                              setLeagueAction(null)
+                            }
+                          }}
+                          style={{
+                            padding: '8px 10px',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: 8,
+                            background: 'transparent',
+                            color: 'inherit',
+                            font: 'inherit',
+                            fontSize: 12,
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </div>
+                  ),
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         <form
           onSubmit={handleJoinLeague}
@@ -4698,11 +4978,13 @@ function SettingsPage({
 }
 
 function LeagueSetupPage({
-  onCreateLeague,
+  onRequestLeague,
   onJoinLeague,
+  leagueRequest,
 }: {
-  onCreateLeague: (leagueName: string) => Promise<League>
+  onRequestLeague: (leagueName: string) => Promise<void>
   onJoinLeague: (joinCode: string) => Promise<League>
+  leagueRequest: LeagueRequest | null
 }) {
   const [leagueName, setLeagueName] = useState('')
   const [joinCode, setJoinCode] = useState('')
@@ -4718,9 +5000,10 @@ function LeagueSetupPage({
     setAction('create')
 
     try {
-      await onCreateLeague(
+      await onRequestLeague(
         leagueName,
       )
+      setLeagueName('')
     } catch (createError) {
       console.error(createError)
 
@@ -4770,8 +5053,36 @@ function LeagueSetupPage({
         </h1>
 
         <p className="subtitle">
-          Create a league or join one with a 6-character code.
+          Request a new league or join an approved league with a 6-character code.
         </p>
+
+        {leagueRequest?.status === 'pending' && (
+          <div
+            style={{
+              marginBottom: 16,
+              padding: 12,
+              border: '1px solid #d9e0ea',
+              borderRadius: 10,
+            }}
+          >
+            <strong>League request pending approval</strong>
+            <p
+              style={{
+                margin: '5px 0 0',
+                fontSize: 12,
+                color: '#64748b',
+              }}
+            >
+              {leagueRequest.leagueName} is waiting for approval. You can still join another league below.
+            </p>
+          </div>
+        )}
+
+        {leagueRequest?.status === 'rejected' && (
+          <p className="login-error">
+            Your last league request was not approved. You may submit a new request.
+          </p>
+        )}
 
         <form
           className="login-form"
@@ -4779,7 +5090,7 @@ function LeagueSetupPage({
         >
           <label>
             <span>
-              New League Name
+              Requested League Name
             </span>
 
             <input
@@ -4798,12 +5109,15 @@ function LeagueSetupPage({
           <button
             type="submit"
             disabled={
-              action !== null
+              action !== null ||
+              leagueRequest?.status === 'pending'
             }
           >
             {action === 'create'
-              ? 'Creating…'
-              : 'Create League'}
+              ? 'Submitting…'
+              : leagueRequest?.status === 'pending'
+                ? 'Pending Approval'
+                : 'Request League'}
           </button>
         </form>
 
@@ -5069,6 +5383,10 @@ function App() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [availableLeagues, setAvailableLeagues] = useState<League[]>([])
   const [activeLeague, setActiveLeague] = useState<League | null>(null)
+  const [leagueRequest, setLeagueRequest] =
+    useState<LeagueRequest | null>(null)
+  const [platformLeagueRequests, setPlatformLeagueRequests] =
+    useState<LeagueRequest[]>([])
   const [authLoading, setAuthLoading] = useState(true)
   const [dataLoading, setDataLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>('home')
@@ -5547,9 +5865,89 @@ function App() {
 
   useEffect(() => {
     if (!user) {
+      setLeagueRequest(null)
+      setPlatformLeagueRequests([])
+      return
+    }
+
+    const currentUser = user
+    let cancelled = false
+
+    async function loadLeagueRequests() {
+      try {
+        const ownRequestSnapshot =
+          await getDoc(
+            doc(
+              db,
+              'leagueRequests',
+              currentUser.uid,
+            ),
+          )
+
+        if (!cancelled) {
+          setLeagueRequest(
+            ownRequestSnapshot.exists()
+              ? (ownRequestSnapshot.data() as LeagueRequest)
+              : null,
+          )
+        }
+
+        if (
+          currentUser.uid ===
+          PLATFORM_OWNER_UID
+        ) {
+          const requestsSnapshot =
+            await getDocs(
+              collection(
+                db,
+                'leagueRequests',
+              ),
+            )
+
+          if (!cancelled) {
+            setPlatformLeagueRequests(
+              requestsSnapshot.docs
+                .map(
+                  (requestDocument) =>
+                    requestDocument.data() as LeagueRequest,
+                )
+                .filter(
+                  (request) =>
+                    request.status ===
+                    'pending',
+                )
+                .sort((a, b) =>
+                  a.leagueName.localeCompare(
+                    b.leagueName,
+                  ),
+                ),
+            )
+          }
+        } else if (!cancelled) {
+          setPlatformLeagueRequests([])
+        }
+      } catch (error) {
+        console.error(
+          'Unable to load league requests.',
+          error,
+        )
+      }
+    }
+
+    loadLeagueRequests()
+
+    return () => {
+      cancelled = true
+    }
+  }, [user])
+
+  useEffect(() => {
+    if (!user) {
       setIsAdmin(false)
       setAvailableLeagues([])
       setActiveLeague(null)
+      setLeagueRequest(null)
+      setPlatformLeagueRequests([])
       setGames([])
       setPicks({})
       setLeaguePlayers([])
@@ -6317,12 +6715,12 @@ function App() {
     )
   }
 
-  async function createLeague(
+  async function requestLeague(
     leagueName: string,
   ) {
     if (!user) {
       throw new Error(
-        'You must be signed in to create a league.',
+        'You must be signed in to request a league.',
       )
     }
 
@@ -6335,25 +6733,122 @@ function App() {
       )
     }
 
+    const requestRef =
+      doc(
+        db,
+        'leagueRequests',
+        user.uid,
+      )
+
+    const existing =
+      await getDoc(
+        requestRef,
+      )
+
+    if (
+      existing.exists() &&
+      existing.data().status ===
+        'pending'
+    ) {
+      throw new Error(
+        'You already have a league request waiting for approval.',
+      )
+    }
+
+    const userSnapshot =
+      await getDoc(
+        doc(
+          db,
+          'users',
+          user.uid,
+        ),
+      )
+
+    const userData =
+      userSnapshot.exists()
+        ? userSnapshot.data()
+        : {}
+
+    const userName =
+      typeof userData.name ===
+        'string' &&
+      userData.name.trim()
+        ? userData.name.trim()
+        : user.email
+          ?.split('@')[0] ??
+          'Player'
+
+    const request: LeagueRequest = {
+      userId: user.uid,
+      userName,
+      leagueName: cleanName,
+      status: 'pending',
+    }
+
+    await setDoc(
+      requestRef,
+      {
+        ...request,
+        requestedAt:
+          serverTimestamp(),
+        updatedAt:
+          serverTimestamp(),
+      },
+    )
+
+    setLeagueRequest(
+      request,
+    )
+
+    if (
+      user.uid ===
+      PLATFORM_OWNER_UID
+    ) {
+      setPlatformLeagueRequests(
+        (current) => [
+          ...current.filter(
+            (item) =>
+              item.userId !==
+              request.userId,
+          ),
+          request,
+        ].sort((a, b) =>
+          a.leagueName.localeCompare(
+            b.leagueName,
+          ),
+        ),
+      )
+    }
+  }
+
+  async function approveLeagueRequest(
+    request: LeagueRequest,
+  ) {
+    if (
+      !user ||
+      user.uid !==
+        PLATFORM_OWNER_UID
+    ) {
+      throw new Error(
+        'Platform owner access is required.',
+      )
+    }
+
+    if (
+      request.status !==
+      'pending'
+    ) {
+      throw new Error(
+        'That request is no longer pending.',
+      )
+    }
+
     const leagueId =
       crypto.randomUUID()
 
     const joinCode =
       await generateUniqueJoinCode()
 
-    const league: League = {
-      id: leagueId,
-      name: cleanName,
-      joinCode,
-      season: SEASON,
-    }
-
-    /*
-     * These writes are intentionally sequential.
-     * The league must exist before the creator's admin membership
-     * can be authorized, and that membership must exist before the
-     * Week 1 and invite writes can be authorized by Firestore rules.
-     */
     await setDoc(
       doc(
         db,
@@ -6361,11 +6856,19 @@ function App() {
         leagueId,
       ),
       {
-        name: cleanName,
+        name:
+          request.leagueName,
         joinCode,
         season: SEASON,
-        createdBy: user.uid,
+        createdBy:
+          request.userId,
         createdAt:
+          serverTimestamp(),
+        approvalStatus:
+          'approved',
+        approvedBy:
+          user.uid,
+        approvedAt:
           serverTimestamp(),
       },
     )
@@ -6376,14 +6879,17 @@ function App() {
         'leagues',
         leagueId,
         'members',
-        user.uid,
+        request.userId,
       ),
       {
-        userId: user.uid,
+        userId:
+          request.userId,
         role: 'admin',
         active: true,
         joinedAt:
           serverTimestamp(),
+        approvedBy:
+          user.uid,
       },
     )
 
@@ -6411,7 +6917,8 @@ function App() {
       {
         leagueId,
         joinCode,
-        createdBy: user.uid,
+        createdBy:
+          request.userId,
         createdAt:
           serverTimestamp(),
       },
@@ -6421,47 +6928,146 @@ function App() {
       doc(
         db,
         'users',
-        user.uid,
+        request.userId,
       ),
       {
         leagueIds:
-          arrayUnion(leagueId),
+          arrayUnion(
+            leagueId,
+          ),
       },
       {
         merge: true,
       },
     )
 
-    localStorage.setItem(
-      `college-pickem-active-league-${user.uid}`,
-      leagueId,
+    await setDoc(
+      doc(
+        db,
+        'leagueRequests',
+        request.userId,
+      ),
+      {
+        status:
+          'approved',
+        approvedLeagueId:
+          leagueId,
+        reviewedBy:
+          user.uid,
+        reviewedAt:
+          serverTimestamp(),
+      },
+      {
+        merge: true,
+      },
     )
 
-    setAvailableLeagues(
+    setPlatformLeagueRequests(
       (current) =>
-        [...current, league]
-          .filter(
-            (
-              item,
-              index,
-              all,
-            ) =>
-              all.findIndex(
-                (candidate) =>
-                  candidate.id ===
-                  item.id,
-              ) === index,
-          )
-          .sort((a, b) =>
-            a.name.localeCompare(
-              b.name,
-            ),
-          ),
+        current.filter(
+          (item) =>
+            item.userId !==
+            request.userId,
+        ),
     )
 
-    setActiveLeague(league)
+    if (
+      request.userId ===
+      user.uid
+    ) {
+      const league: League = {
+        id: leagueId,
+        name:
+          request.leagueName,
+        joinCode,
+        season: SEASON,
+      }
 
-    return league
+      setLeagueRequest({
+        ...request,
+        status: 'approved',
+        approvedLeagueId:
+          leagueId,
+      })
+
+      setAvailableLeagues(
+        (current) =>
+          [...current, league]
+            .filter(
+              (
+                item,
+                index,
+                all,
+              ) =>
+                all.findIndex(
+                  (candidate) =>
+                    candidate.id ===
+                    item.id,
+                ) === index,
+            )
+            .sort((a, b) =>
+              a.name.localeCompare(
+                b.name,
+              ),
+            ),
+      )
+
+      setActiveLeague(
+        league,
+      )
+    }
+  }
+
+  async function rejectLeagueRequest(
+    request: LeagueRequest,
+  ) {
+    if (
+      !user ||
+      user.uid !==
+        PLATFORM_OWNER_UID
+    ) {
+      throw new Error(
+        'Platform owner access is required.',
+      )
+    }
+
+    await setDoc(
+      doc(
+        db,
+        'leagueRequests',
+        request.userId,
+      ),
+      {
+        status:
+          'rejected',
+        reviewedBy:
+          user.uid,
+        reviewedAt:
+          serverTimestamp(),
+      },
+      {
+        merge: true,
+      },
+    )
+
+    setPlatformLeagueRequests(
+      (current) =>
+        current.filter(
+          (item) =>
+            item.userId !==
+            request.userId,
+        ),
+    )
+
+    if (
+      request.userId ===
+      user.uid
+    ) {
+      setLeagueRequest({
+        ...request,
+        status: 'rejected',
+      })
+    }
   }
 
   async function joinLeague(
@@ -7333,8 +7939,9 @@ function App() {
   if (!activeLeague) {
     return (
       <LeagueSetupPage
-        onCreateLeague={createLeague}
+        onRequestLeague={requestLeague}
         onJoinLeague={joinLeague}
+        leagueRequest={leagueRequest}
       />
     )
   }
@@ -7420,9 +8027,13 @@ function App() {
         leaguePlayers={leaguePlayers}
         themePreference={themePreference}
         onThemePreferenceChange={setThemePreference}
-        onCreateLeague={createLeague}
+        onRequestLeague={requestLeague}
         onJoinLeague={joinLeague}
         onSwitchLeague={switchLeague}
+        leagueRequest={leagueRequest}
+        platformLeagueRequests={platformLeagueRequests}
+        onApproveLeagueRequest={approveLeagueRequest}
+        onRejectLeagueRequest={rejectLeagueRequest}
         onPromoteMember={(userId) =>
           updateMemberRole(
             userId,
