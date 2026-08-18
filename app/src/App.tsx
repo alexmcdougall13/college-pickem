@@ -3561,6 +3561,7 @@ function SettingsPage({
   onDemoteMember,
   onRemoveMember,
   onReinstateMember,
+  onSaveDisplayName,
   notificationSupported,
   notificationPermission,
   notificationsEnabled,
@@ -3587,6 +3588,7 @@ function SettingsPage({
   onDemoteMember: (userId: string) => Promise<void>
   onRemoveMember: (userId: string) => Promise<void>
   onReinstateMember: (userId: string) => Promise<void>
+  onSaveDisplayName: (displayName: string) => Promise<void>
   notificationSupported: boolean
   notificationPermission: NotificationPermission
   notificationsEnabled: boolean
@@ -3602,11 +3604,87 @@ function SettingsPage({
   const [leagueMessage, setLeagueMessage] = useState('')
   const [leagueError, setLeagueError] = useState('')
   const [inviteMessage, setInviteMessage] = useState('')
+  const currentLeaguePlayer =
+    leaguePlayers.find(
+      (player) =>
+        player.uid === user.uid,
+    )
+  const [displayName, setDisplayName] =
+    useState(
+      currentLeaguePlayer?.name ?? '',
+    )
+  const [displayNameBusy, setDisplayNameBusy] =
+    useState(false)
+  const [displayNameMessage, setDisplayNameMessage] =
+    useState('')
+  const [displayNameError, setDisplayNameError] =
+    useState('')
   const [memberActionUserId, setMemberActionUserId] =
     useState<string | null>(null)
 
+  useEffect(() => {
+    setDisplayName(
+      currentLeaguePlayer?.name ?? '',
+    )
+    setDisplayNameMessage('')
+    setDisplayNameError('')
+  }, [
+    activeLeague.id,
+    currentLeaguePlayer?.name,
+  ])
+
   async function handleSignOut() {
     await signOut(auth)
+  }
+
+  async function handleDisplayNameSave(
+    event: React.FormEvent,
+  ) {
+    event.preventDefault()
+
+    const cleanName =
+      displayName.trim()
+
+    if (!cleanName) {
+      setDisplayNameError(
+        'Enter a display name.',
+      )
+      return
+    }
+
+    if (cleanName.length > 30) {
+      setDisplayNameError(
+        'Display name must be 30 characters or fewer.',
+      )
+      return
+    }
+
+    setDisplayNameBusy(true)
+    setDisplayNameError('')
+    setDisplayNameMessage('')
+
+    try {
+      await onSaveDisplayName(
+        cleanName,
+      )
+
+      setDisplayName(
+        cleanName,
+      )
+      setDisplayNameMessage(
+        'Display name saved for this league.',
+      )
+    } catch (error) {
+      console.error(error)
+
+      setDisplayNameError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to save your display name.',
+      )
+    } finally {
+      setDisplayNameBusy(false)
+    }
   }
 
   async function handleRequestLeague(
@@ -4111,6 +4189,112 @@ function SettingsPage({
 
       <div className="settings-card account-settings-card">
         <h2>Leagues</h2>
+
+        <form
+          onSubmit={handleDisplayNameSave}
+          style={{
+            marginTop: 12,
+            marginBottom: 18,
+            paddingBottom: 18,
+            borderBottom:
+              '1px solid #edf0f5',
+          }}
+        >
+          <label
+            style={{
+              display: 'block',
+              fontWeight: 800,
+            }}
+          >
+            <span
+              style={{
+                display: 'block',
+                marginBottom: 6,
+                fontSize: 12,
+              }}
+            >
+              Display name in {activeLeague.name}
+            </span>
+
+            <input
+              type="text"
+              value={displayName}
+              onChange={(event) =>
+                setDisplayName(
+                  event.target.value,
+                )
+              }
+              maxLength={30}
+              disabled={displayNameBusy}
+              placeholder="Your name or nickname"
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                padding: '11px 12px',
+                border:
+                  '1px solid #cbd5e1',
+                borderRadius: 10,
+                font: 'inherit',
+              }}
+            />
+          </label>
+
+          <p
+            style={{
+              margin: '6px 0 0',
+              color:
+                'var(--theme-muted, #64748b)',
+              fontSize: 12,
+            }}
+          >
+            This name applies only inside this league.
+          </p>
+
+          <button
+            type="submit"
+            disabled={
+              displayNameBusy ||
+              !displayName.trim() ||
+              displayName.trim() ===
+                (currentLeaguePlayer?.name ?? '')
+            }
+            style={{
+              width: '100%',
+              marginTop: 9,
+              padding: '10px 12px',
+              border: 0,
+              borderRadius: 10,
+              font: 'inherit',
+              fontWeight: 800,
+              cursor:
+                displayNameBusy
+                  ? 'wait'
+                  : 'pointer',
+            }}
+          >
+            {displayNameBusy
+              ? 'Saving…'
+              : 'Save Display Name'}
+          </button>
+
+          {displayNameMessage && (
+            <p
+              style={{
+                margin: '8px 0 0',
+                fontSize: 12,
+                fontWeight: 800,
+              }}
+            >
+              {displayNameMessage}
+            </p>
+          )}
+
+          {displayNameError && (
+            <p className="login-error">
+              {displayNameError}
+            </p>
+          )}
+        </form>
 
         <label
           style={{
@@ -6231,6 +6415,10 @@ function App() {
             return [
               String(data.userId ?? memberDocument.id),
               {
+                displayName:
+                  typeof data.displayName === 'string'
+                    ? data.displayName.trim()
+                    : '',
                 role:
                   data.role === 'admin'
                     ? 'admin'
@@ -6287,6 +6475,7 @@ function App() {
             return {
               uid: userDocument.id,
               name:
+                membership?.displayName ||
                 savedFirstName ||
                 savedName ||
                 fallbackName,
@@ -6884,6 +7073,8 @@ function App() {
       {
         userId:
           request.userId,
+        displayName:
+          request.userName,
         role: 'admin',
         active: true,
         joinedAt:
@@ -7163,6 +7354,41 @@ function App() {
       !existingMembership.exists()
     ) {
       try {
+        const userSnapshot =
+          await getDoc(
+            doc(
+              db,
+              'users',
+              user.uid,
+            ),
+          )
+
+        const userData =
+          userSnapshot.exists()
+            ? userSnapshot.data()
+            : {}
+
+        const defaultDisplayName =
+          (
+            typeof userData.firstName ===
+              'string'
+              ? userData.firstName.trim()
+              : ''
+          ) ||
+          (
+            typeof userData.name ===
+              'string'
+              ? userData.name.trim()
+              : ''
+          ) ||
+          user.email
+            ?.split('@')[0]
+            .replace(
+              /[^a-zA-Z]/g,
+              '',
+            ) ||
+          'Player'
+
         await setDoc(
           doc(
             db,
@@ -7173,6 +7399,8 @@ function App() {
           ),
           {
             userId: user.uid,
+            displayName:
+              defaultDisplayName,
             role: 'player',
             active: true,
             inviteId: joinCode,
@@ -7293,6 +7521,68 @@ function App() {
     setActiveLeague(league)
 
     return league
+  }
+
+  async function saveLeagueDisplayName(
+    displayName: string,
+  ) {
+    if (
+      !user ||
+      !activeLeague
+    ) {
+      throw new Error(
+        'A league must be active to change your display name.',
+      )
+    }
+
+    const cleanName =
+      displayName.trim()
+
+    if (!cleanName) {
+      throw new Error(
+        'Enter a display name.',
+      )
+    }
+
+    if (
+      cleanName.length > 30
+    ) {
+      throw new Error(
+        'Display name must be 30 characters or fewer.',
+      )
+    }
+
+    await setDoc(
+      doc(
+        db,
+        'leagues',
+        activeLeague.id,
+        'members',
+        user.uid,
+      ),
+      {
+        displayName:
+          cleanName,
+        updatedAt:
+          serverTimestamp(),
+      },
+      {
+        merge: true,
+      },
+    )
+
+    setLeaguePlayers(
+      (current) =>
+        current.map(
+          (player) =>
+            player.uid === user.uid
+              ? {
+                  ...player,
+                  name: cleanName,
+                }
+              : player,
+        ),
+    )
   }
 
   async function updateMemberRole(
@@ -8048,6 +8338,7 @@ function App() {
         }
         onRemoveMember={removeLeagueMember}
         onReinstateMember={reinstateLeagueMember}
+        onSaveDisplayName={saveLeagueDisplayName}
         notificationSupported={notificationSupported}
         notificationPermission={notificationPermission}
         notificationsEnabled={notificationsEnabled}
