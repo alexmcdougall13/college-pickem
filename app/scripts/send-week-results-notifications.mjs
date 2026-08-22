@@ -47,6 +47,73 @@ const db =
 const messaging =
   getMessaging()
 
+function isPermanentRegistrationError(
+  error,
+) {
+  const code =
+    String(
+      error?.code ?? '',
+    )
+
+  return [
+    'messaging/registration-token-not-registered',
+    'messaging/invalid-registration-token',
+    'messaging/invalid-argument',
+  ].includes(code)
+}
+
+async function disableStaleRegistration(
+  userId,
+  installationId,
+) {
+  const registrations =
+    await db
+      .collection('users')
+      .doc(userId)
+      .collection(
+        'notificationRegistrations',
+      )
+      .where(
+        'installationId',
+        '==',
+        installationId,
+      )
+      .get()
+
+  if (
+    registrations.empty
+  ) {
+    return
+  }
+
+  const batch =
+    db.batch()
+
+  registrations.docs.forEach(
+    (document) => {
+      batch.set(
+        document.ref,
+        {
+          enabled: false,
+          disabledReason:
+            'invalid-registration',
+          disabledAt:
+            new Date(),
+        },
+        {
+          merge: true,
+        },
+      )
+    },
+  )
+
+  await batch.commit()
+
+  console.log(
+    `Disabled stale notification registration for ${userId}.`,
+  )
+}
+
 const TEST_MODE =
   process.env.TEST_MODE === 'true'
 
@@ -71,7 +138,6 @@ if (
     'Test mode requires TEST_LEAGUE_ID and TEST_WEEK_ID.',
   )
 }
-
 
 function participatedInWeek(
   member,
@@ -122,7 +188,6 @@ function participatedInWeek(
 
   return true
 }
-
 
 function pickResult(
   game,
@@ -181,7 +246,6 @@ function pickResult(
 
   return 'push'
 }
-
 
 async function displayNameForMember(
   memberDocument,
@@ -255,7 +319,6 @@ async function displayNameForMember(
   return 'Player'
 }
 
-
 async function enabledFidsForUser(
   userId,
 ) {
@@ -315,7 +378,6 @@ async function enabledFidsForUser(
   }
 }
 
-
 function resultMarkerId(
   weekId,
 ) {
@@ -326,7 +388,6 @@ function resultMarkerId(
     '_',
   )}`
 }
-
 
 async function processWeek(
   leagueDocument,
@@ -624,7 +685,7 @@ async function processWeek(
           ),
         )
 
-            if (
+      if (
         result === 'ahead'
       ) {
         correct += 1
@@ -848,17 +909,35 @@ async function processWeek(
         response.successCount
     }
 
-    response.responses.forEach(
-      (result, index) => {
-        if (
-          !result.success
-        ) {
+    await Promise.all(
+      response.responses.map(
+        async (
+          result,
+          index,
+        ) => {
+          if (
+            result.success
+          ) {
+            return
+          }
+
           console.error(
             `Failed device ${index + 1} for ${userId}:`,
             result.error,
           )
-        }
-      },
+
+          if (
+            isPermanentRegistrationError(
+              result.error,
+            )
+          ) {
+            await disableStaleRegistration(
+              userId,
+              fids[index],
+            )
+          }
+        },
+      ),
     )
   }
 
@@ -921,7 +1000,6 @@ async function processWeek(
   return true
 }
 
-
 console.log(
   TEST_MODE
     ? `TEST MODE: checking ${TEST_LEAGUE_ID} / ${TEST_WEEK_ID}. No results marker will be written.`
@@ -967,8 +1045,6 @@ for (
     }
   }
 }
-
-console.log('')
 
 console.log(
   weeksNotified === 0

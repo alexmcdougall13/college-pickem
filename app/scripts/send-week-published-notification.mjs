@@ -1,3 +1,6 @@
+cd /workspaces/college-pickem
+
+cat > app/scripts/send-week-published-notification.mjs <<'EOF'
 import {
   cert,
   initializeApp,
@@ -42,6 +45,73 @@ initializeApp({
 
 const db = getFirestore()
 const messaging = getMessaging()
+
+function isPermanentRegistrationError(
+  error,
+) {
+  const code =
+    String(
+      error?.code ?? '',
+    )
+
+  return [
+    'messaging/registration-token-not-registered',
+    'messaging/invalid-registration-token',
+    'messaging/invalid-argument',
+  ].includes(code)
+}
+
+async function disableStaleRegistration(
+  userId,
+  installationId,
+) {
+  const registrations =
+    await db
+      .collection('users')
+      .doc(userId)
+      .collection(
+        'notificationRegistrations',
+      )
+      .where(
+        'installationId',
+        '==',
+        installationId,
+      )
+      .get()
+
+  if (
+    registrations.empty
+  ) {
+    return
+  }
+
+  const batch =
+    db.batch()
+
+  registrations.docs.forEach(
+    (document) => {
+      batch.set(
+        document.ref,
+        {
+          enabled: false,
+          disabledReason:
+            'invalid-registration',
+          disabledAt:
+            new Date(),
+        },
+        {
+          merge: true,
+        },
+      )
+    },
+  )
+
+  await batch.commit()
+
+  console.log(
+    `Disabled stale notification registration for ${userId}.`,
+  )
+}
 
 const leagueId =
   process.argv[2]
@@ -210,15 +280,35 @@ for (
       response.successCount
   }
 
-  response.responses.forEach(
-    (result, index) => {
-      if (!result.success) {
+  await Promise.all(
+    response.responses.map(
+      async (
+        result,
+        index,
+      ) => {
+        if (
+          result.success
+        ) {
+          return
+        }
+
         console.error(
           `Failed device ${index + 1} for ${userId}:`,
           result.error,
         )
-      }
-    },
+
+        if (
+          isPermanentRegistrationError(
+            result.error,
+          )
+        ) {
+          await disableStaleRegistration(
+            userId,
+            fids[index],
+          )
+        }
+      },
+    ),
   )
 }
 
