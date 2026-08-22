@@ -377,10 +377,10 @@ service cloud.firestore {
         allow update: if isLeagueMember(leagueId)
           && resource.data.userId == request.auth.uid
           && request.resource.data.userId == request.auth.uid
-          && request.resource.data.gameId == resource.data.gameId
+          && request.resource.data.weekId == resource.data.weekId
           && leagueGameHasNotStarted(
             leagueId,
-            resource.data.gameId
+            request.resource.data.gameId
           );
 
         allow delete: if false;
