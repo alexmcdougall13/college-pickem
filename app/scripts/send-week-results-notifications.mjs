@@ -47,6 +47,31 @@ const db =
 const messaging =
   getMessaging()
 
+const TEST_MODE =
+  process.env.TEST_MODE === 'true'
+
+const TEST_LEAGUE_ID =
+  String(
+    process.env.TEST_LEAGUE_ID ?? '',
+  ).trim()
+
+const TEST_WEEK_ID =
+  String(
+    process.env.TEST_WEEK_ID ?? '',
+  ).trim()
+
+if (
+  TEST_MODE &&
+  (
+    !TEST_LEAGUE_ID ||
+    !TEST_WEEK_ID
+  )
+) {
+  throw new Error(
+    'Test mode requires TEST_LEAGUE_ID and TEST_WEEK_ID.',
+  )
+}
+
 
 function participatedInWeek(
   member,
@@ -310,6 +335,14 @@ async function processWeek(
   const leagueId =
     leagueDocument.id
 
+  if (
+    TEST_MODE &&
+    leagueId !==
+      TEST_LEAGUE_ID
+  ) {
+    return false
+  }
+
   const league =
     leagueDocument.data()
 
@@ -327,6 +360,14 @@ async function processWeek(
       week.weekId ??
         weekDocument.id,
     )
+
+  if (
+    TEST_MODE &&
+    weekId !==
+      TEST_WEEK_ID
+  ) {
+    return false
+  }
 
   const weekLabel =
     String(
@@ -363,6 +404,7 @@ async function processWeek(
     await markerRef.get()
 
   if (
+    !TEST_MODE &&
     existingMarker.exists
   ) {
     return false
@@ -400,11 +442,15 @@ async function processWeek(
       }),
     )
 
-  if (
-    !games.every(
+  const allGamesFinal =
+    games.every(
       (game) =>
         game.final === true,
     )
+
+  if (
+    !TEST_MODE &&
+    !allGamesFinal
   ) {
     return false
   }
@@ -703,6 +749,12 @@ async function processWeek(
   let body = ''
 
   if (
+    TEST_MODE &&
+    !allGamesFinal
+  ) {
+    body =
+      `TEST: ${weekLabel} results notification. No production results marker will be written.`
+  } else if (
     winners.length === 1
   ) {
     body =
@@ -768,7 +820,9 @@ async function processWeek(
 
           notification: {
             title:
-              `${leagueName} — ${weekLabel} Results`,
+              TEST_MODE
+                ? `${leagueName} — TEST Results`
+                : `${leagueName} — ${weekLabel} Results`,
 
             body,
           },
@@ -824,32 +878,40 @@ async function processWeek(
     return false
   }
 
-  await markerRef.set({
-    type:
-      'week-results',
+  if (
+    !TEST_MODE
+  ) {
+    await markerRef.set({
+      type:
+        'week-results',
 
-    weekId,
+      weekId,
 
-    weekLabel,
+      weekLabel,
 
-    winnerIds:
-      winners.map(
-        (winner) =>
-          winner.userId,
-      ),
+      winnerIds:
+        winners.map(
+          (winner) =>
+            winner.userId,
+        ),
 
-    winnerNames,
+      winnerNames,
 
-    winningScore:
-      winningRecord.correct,
+      winningScore:
+        winningRecord.correct,
 
-    usersNotified,
+      usersNotified,
 
-    devicesNotified,
+      devicesNotified,
 
-    sentAt:
-      FieldValue.serverTimestamp(),
-  })
+      sentAt:
+        FieldValue.serverTimestamp(),
+    })
+  } else {
+    console.log(
+      'TEST MODE: results marker was not written.',
+    )
+  }
 
   console.log(
     `✓ ${leagueName} ${weekLabel}: ${body} Sent to ${usersNotified} user(s) / ${devicesNotified} device(s).`,
@@ -860,7 +922,9 @@ async function processWeek(
 
 
 console.log(
-  'Checking for completed weeks...',
+  TEST_MODE
+    ? `TEST MODE: checking ${TEST_LEAGUE_ID} / ${TEST_WEEK_ID}. No results marker will be written.`
+    : 'Checking for completed weeks...',
 )
 
 const leaguesSnapshot =
