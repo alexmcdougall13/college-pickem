@@ -529,9 +529,10 @@ function HomePage({
               boxShadow: '0 10px 30px rgba(15, 23, 42, 0.05)',
             }}
           >
-            <div style={{ overflowX: 'auto' }}>
+            <div className="pick-grid-scroll">
               <div style={{ minWidth: picksGridMinWidth }}>
                 <div
+                  className="pick-grid-header"
                   style={{
                     display: 'grid',
                     gridTemplateColumns: picksGridTemplate,
@@ -540,7 +541,10 @@ function HomePage({
                     background: '#f8fafc',
                   }}
                 >
-                  <div style={{ padding: '14px 12px' }}>
+                  <div
+                    className="sticky-grid-corner"
+                    style={{ padding: '14px 12px' }}
+                  >
                     <span className="eyebrow" style={{ margin: 0 }}>
                       {weekLabel} Picks
                     </span>
@@ -549,6 +553,7 @@ function HomePage({
                   {orderedPlayers.map((player) => (
                     <div
                       key={player.name}
+                      className="sticky-grid-header-cell"
                       style={{
                         padding: '12px 6px',
                         textAlign: 'center',
@@ -598,6 +603,7 @@ function HomePage({
                       }}
                     >
                       <div
+                        className="sticky-grid-first-column"
                         style={{
                           padding: '10px 8px',
                           display: 'flex',
@@ -888,7 +894,10 @@ function HomePage({
                       background: '#f8fafc',
                     }}
                   >
-                    <div style={{ padding: '14px 12px' }}>
+                    <div
+                      className="sticky-grid-first-column"
+                      style={{ padding: '14px 12px' }}
+                    >
                       <div style={{ fontWeight: 800, fontSize: 13 }}>
                         Tiebreaker
                       </div>
@@ -1929,9 +1938,10 @@ function HistoryPage({
           overflow: 'hidden',
         }}
       >
-        <div style={{ overflowX: 'auto' }}>
+        <div className="pick-grid-scroll">
           <div style={{ minWidth: historyGridMinWidth }}>
             <div
+              className="pick-grid-header"
               style={{
                 display: 'grid',
                 gridTemplateColumns: historyGridTemplate,
@@ -1940,7 +1950,10 @@ function HistoryPage({
                 background: '#f8fafc',
               }}
             >
-              <div style={{ padding: '14px 10px' }}>
+              <div
+                className="sticky-grid-corner"
+                style={{ padding: '14px 10px' }}
+              >
                 <span className="eyebrow" style={{ margin: 0 }}>
                   Game Results
                 </span>
@@ -1949,6 +1962,7 @@ function HistoryPage({
               {orderedPlayers.map((player) => (
                 <div
                   key={`history-header-${player.uid || player.name}`}
+                  className="sticky-grid-header-cell"
                   style={{
                     padding: '12px 6px',
                     textAlign: 'center',
@@ -1975,6 +1989,7 @@ function HistoryPage({
                   }}
                 >
                   <div
+                    className="sticky-grid-first-column"
                     style={{
                       minHeight: 82,
                       padding: '10px 8px',
@@ -2149,7 +2164,10 @@ function HistoryPage({
                   background: '#f8fafc',
                 }}
               >
-                <div style={{ padding: '14px 12px' }}>
+                <div
+                  className="sticky-grid-first-column"
+                  style={{ padding: '14px 12px' }}
+                >
                   <div
                     style={{
                       fontWeight: 800,
@@ -6955,6 +6973,15 @@ function App() {
 
         setHomeTiebreakers(loadedHomeTiebreakers)
 
+                /*
+         * The current league/week is now ready to display.
+         * Historical weeks can continue loading in the background
+         * instead of holding the entire app on the loading screen.
+         */
+        if (!cancelled) {
+          setDataLoading(false)
+        }
+
         const seasonData: SeasonWeekData[] = []
 
         for (const week of [...loadedWeeks].sort(
@@ -8705,7 +8732,8 @@ function App() {
         style={{
           maxWidth: 760,
           margin: '0 auto',
-          padding: '12px 16px 0',
+          padding:
+            'calc(12px + env(safe-area-inset-top)) 16px 0',
         }}
       >
         <div

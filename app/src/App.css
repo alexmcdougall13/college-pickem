@@ -646,3 +646,172 @@ button.team-card:active {
 :root[data-theme='dark'] .money-negative {
   color: #ff7b7b !important;
 }
+
+/* ===== Installed iPhone web-app / wide pick-grid polish ===== */
+
+/*
+ * The application can extend into the iPhone safe area because
+ * viewport-fit=cover is enabled. Keep the overall shell sized to
+ * the visible standalone-app viewport.
+ */
+.app-shell {
+  min-height: 100dvh;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.app-content {
+  min-height: 100dvh;
+}
+
+/*
+ * Home + History boards.
+ *
+ * Make the board itself the scroll area. This is important on
+ * iOS Safari/PWA: the same element now owns BOTH horizontal and
+ * vertical scrolling, so sticky top + sticky left work reliably.
+ */
+.pick-grid-scroll {
+  position: relative;
+
+  width: 100%;
+
+  /*
+   * Allow a large board, but keep enough room for the fixed
+   * bottom navigation and iPhone safe areas.
+   */
+  max-height:
+    calc(
+      100dvh -
+      env(safe-area-inset-top) -
+      env(safe-area-inset-bottom) -
+      92px
+    );
+
+  overflow: auto;
+
+  -webkit-overflow-scrolling: touch;
+
+  overscroll-behavior: contain;
+}
+
+/*
+ * Player-name header.
+ *
+ * top: 0 is intentional. Do NOT use safe-area-inset-top here.
+ * The table is its own scroll container, so adding the safe-area
+ * value creates the large blank region you were seeing.
+ */
+.pick-grid-header {
+  position: sticky;
+  top: 0;
+
+  z-index: 30;
+
+  background: #f8fafc;
+
+  box-shadow:
+    0 1px 0 #e7ebf1;
+}
+
+/*
+ * Normal player header cells.
+ */
+.sticky-grid-header-cell {
+  position: relative;
+
+  z-index: 31;
+
+  background: #f8fafc;
+}
+
+/*
+ * Upper-left cell:
+ * Week Picks / Game Results.
+ *
+ * It has to stay fixed vertically AND horizontally.
+ */
+.sticky-grid-corner {
+  position: sticky;
+
+  left: 0;
+
+  z-index: 40;
+
+  background: #f8fafc;
+
+  box-shadow:
+    1px 0 0 #e7ebf1,
+    0 1px 0 #e7ebf1;
+}
+
+/*
+ * Game information column.
+ *
+ * This stays visible when swiping horizontally across players.
+ */
+.sticky-grid-first-column {
+  position: sticky;
+
+  left: 0;
+
+  z-index: 20;
+
+  background: #fff;
+
+  box-shadow:
+    1px 0 0 #edf0f5;
+}
+
+/*
+ * Prevent sticky cells from becoming transparent while other
+ * grid cells move underneath them.
+ */
+.pick-grid-header,
+.sticky-grid-header-cell,
+.sticky-grid-corner,
+.sticky-grid-first-column {
+  background-clip: padding-box;
+}
+
+/* ===== Dark mode versions ===== */
+
+:root[data-theme='dark']
+.pick-grid-header,
+:root[data-theme='dark']
+.sticky-grid-header-cell,
+:root[data-theme='dark']
+.sticky-grid-corner {
+  background: #162033 !important;
+
+  color: #f1f5f9 !important;
+
+  border-color: #29364a !important;
+}
+
+:root[data-theme='dark']
+.sticky-grid-first-column {
+  background: #111a2b !important;
+
+  color: #f1f5f9 !important;
+
+  border-color: #29364a !important;
+}
+
+:root[data-theme='dark']
+.pick-grid-header {
+  box-shadow:
+    0 1px 0 #29364a;
+}
+
+:root[data-theme='dark']
+.sticky-grid-corner {
+  box-shadow:
+    1px 0 0 #29364a,
+    0 1px 0 #29364a;
+}
+
+:root[data-theme='dark']
+.sticky-grid-first-column {
+  box-shadow:
+    1px 0 0 #29364a;
+}
