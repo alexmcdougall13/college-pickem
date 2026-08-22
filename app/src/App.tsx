@@ -717,7 +717,11 @@ function HomePage({
                               game.statusState === 'in' || game.final
                                 ? 700
                                 : 400,
-                            whiteSpace: 'nowrap',
+                            whiteSpace: 'normal',
+                            overflowWrap: 'anywhere',
+                            wordBreak: 'normal',
+                            padding: '0 4px',
+                            boxSizing: 'border-box',
                             textAlign: 'center',
                           }}
                         >
@@ -1925,39 +1929,38 @@ function HistoryPage({
           overflow: 'hidden',
         }}
       >
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: historyGridTemplate,
-            alignItems: 'center',
-            borderBottom: '1px solid #e7ebf1',
-            background: '#f8fafc',
-            minWidth: historyGridMinWidth,
-          }}
-        >
-          <div style={{ padding: '14px 10px' }}>
-            <span className="eyebrow" style={{ margin: 0 }}>
-              Game Results
-            </span>
-          </div>
-
-          {orderedPlayers.map((player) => (
+        <div style={{ overflowX: 'auto' }}>
+          <div style={{ minWidth: historyGridMinWidth }}>
             <div
-              key={`history-header-${player.uid || player.name}`}
               style={{
-                padding: '12px 6px',
-                textAlign: 'center',
-                fontWeight: 800,
-                fontSize: 13,
+                display: 'grid',
+                gridTemplateColumns: historyGridTemplate,
+                alignItems: 'center',
+                borderBottom: '1px solid #e7ebf1',
+                background: '#f8fafc',
               }}
             >
-              {player.name}
-            </div>
-          ))}
-        </div>
+              <div style={{ padding: '14px 10px' }}>
+                <span className="eyebrow" style={{ margin: 0 }}>
+                  Game Results
+                </span>
+              </div>
 
-        <div style={{ overflowX: 'auto' }}>
-          <div style={{ minWidth: 440 }}>
+              {orderedPlayers.map((player) => (
+                <div
+                  key={`history-header-${player.uid || player.name}`}
+                  style={{
+                    padding: '12px 6px',
+                    textAlign: 'center',
+                    fontWeight: 800,
+                    fontSize: 13,
+                  }}
+                >
+                  {player.name}
+                </div>
+              ))}
+            </div>
+
             {selectedWeek.games.map((game) => {
               const locked = isGameLocked(game.kickoff)
 
@@ -2141,8 +2144,7 @@ function HistoryPage({
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns:
-                    '1.55fr repeat(3, 1fr)',
+                  gridTemplateColumns: historyGridTemplate,
                   alignItems: 'center',
                   background: '#f8fafc',
                 }}
