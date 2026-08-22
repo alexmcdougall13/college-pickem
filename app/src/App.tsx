@@ -6937,7 +6937,17 @@ function App() {
               },
             }
           })
-          .sort((a, b) => a.order - b.order)
+          .sort((a, b) => {
+          const kickoffDifference =
+            new Date(a.kickoff).getTime() -
+            new Date(b.kickoff).getTime()
+
+          if (kickoffDifference !== 0) {
+            return kickoffDifference
+          }
+
+          return a.order - b.order
+        })
 
         setGames(loadedGames)
 
@@ -7173,7 +7183,17 @@ function App() {
                   },
                 }
               })
-              .sort((a, b) => a.order - b.order)
+              .sort((a, b) => {
+          const kickoffDifference =
+            new Date(a.kickoff).getTime() -
+            new Date(b.kickoff).getTime()
+
+          if (kickoffDifference !== 0) {
+            return kickoffDifference
+          }
+
+          return a.order - b.order
+        })
 
           const historicalPicks: HomePicks = {}
 
