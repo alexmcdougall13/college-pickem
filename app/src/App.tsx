@@ -6502,84 +6502,137 @@ function App() {
           ]),
         )
 
-        const memberships: {
-          league: League
-          role: LeagueRole
-        }[] = []
+        const membershipResults =
+          await Promise.all(
+            candidateLeagueIds.map(
+              async (leagueId) => {
+                try {
+                  const membershipSnapshot =
+                    await getDoc(
+                      doc(
+                        db,
+                        'leagues',
+                        leagueId,
+                        'members',
+                        currentUser.uid,
+                      ),
+                    )
 
-        for (const leagueId of candidateLeagueIds) {
-          let membershipSnapshot
+                  if (!membershipSnapshot.exists()) {
+                    return null
+                  }
 
-          try {
-            membershipSnapshot = await getDoc(
-              doc(
-                db,
-                'leagues',
-                leagueId,
-                'members',
-                currentUser.uid,
-              ),
-            )
-          } catch (error) {
-            /*
-             * A removed member's membership document still exists,
-             * but Firestore correctly blocks that inactive user from
-             * reading it. Skip only that league instead of aborting the
-             * user's entire league list.
-             */
-            console.info(
-              `Skipping inaccessible league membership ${leagueId}.`,
-              error,
-            )
-            continue
-          }
+                  const membershipData =
+                    membershipSnapshot.data()
 
-          if (!membershipSnapshot.exists()) {
-            continue
-          }
+                  if (
+                    membershipData.active === false
+                  ) {
+                    return null
+                  }
 
-          const membershipData = membershipSnapshot.data()
+                  return {
+                    leagueId,
+                    role:
+                      membershipData.role ===
+                      'admin'
+                        ? 'admin' as LeagueRole
+                        : 'player' as LeagueRole,
+                  }
+                } catch (error) {
+                  /*
+                   * A removed member's membership document can still
+                   * exist while Firestore blocks that inactive user
+                   * from reading it. Skip only that league.
+                   */
+                  console.info(
+                    `Skipping inaccessible league membership ${leagueId}.`,
+                    error,
+                  )
 
-          if (membershipData.active === false) {
-            continue
-          }
+                  return null
+                }
+              },
+            ),
+          )
 
-          let leagueSnapshot
+        const accessibleMemberships =
+          membershipResults.filter(
+            (
+              membership,
+            ): membership is {
+              leagueId: string
+              role: LeagueRole
+            } =>
+              membership !== null,
+          )
 
-          try {
-            leagueSnapshot = await getDoc(
-              doc(db, 'leagues', leagueId),
-            )
-          } catch (error) {
-            console.info(
-              `Skipping inaccessible league ${leagueId}.`,
-              error,
-            )
-            continue
-          }
+        const leagueResults =
+          await Promise.all(
+            accessibleMemberships.map(
+              async (membership) => {
+                try {
+                  const leagueSnapshot =
+                    await getDoc(
+                      doc(
+                        db,
+                        'leagues',
+                        membership.leagueId,
+                      ),
+                    )
 
-          if (!leagueSnapshot.exists()) {
-            continue
-          }
+                  if (!leagueSnapshot.exists()) {
+                    return null
+                  }
 
-          const leagueData = leagueSnapshot.data()
+                  const leagueData =
+                    leagueSnapshot.data()
 
-          memberships.push({
-            league: {
-              id: leagueId,
-              name: String(leagueData.name ?? 'College Pick’em'),
-              joinCode: String(leagueData.joinCode ?? ''),
-              season:
-                typeof leagueData.season === 'number'
-                  ? leagueData.season
-                  : SEASON,
-            },
-            role:
-              membershipData.role === 'admin'
-                ? 'admin'
-                : 'player',
-          })
-        }
+                  return {
+                    league: {
+                      id:
+                        membership.leagueId,
+                      name:
+                        String(
+                          leagueData.name ??
+                            'College Pick’em',
+                        ),
+                      joinCode:
+                        String(
+                          leagueData.joinCode ??
+                            '',
+                        ),
+                      season:
+                        typeof leagueData.season ===
+                          'number'
+                          ? leagueData.season
+                          : SEASON,
+                    },
+                    role:
+                      membership.role,
+                  }
+                } catch (error) {
+                  console.info(
+                    `Skipping inaccessible league ${membership.leagueId}.`,
+                    error,
+                  )
+
+                  return null
+                }
+              },
+            ),
+          )
+
+        const memberships =
+          leagueResults.filter(
+            (
+              membership,
+            ): membership is {
+              league: League
+              role: LeagueRole
+            } =>
+              membership !== null,
+          )
 
         if (cancelled) return
 
@@ -6950,6 +7003,7 @@ function App() {
          * can safely authorize this query because every returned
          * document must belong to the current user.
          */
+
         const currentUserTiebreakers =
           await getDocs(
             query(
