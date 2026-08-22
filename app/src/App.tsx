@@ -7578,6 +7578,38 @@ function App() {
       )
     }
 
+        const userProfileSnapshot =
+      await getDoc(
+        doc(
+          db,
+          'users',
+          user.uid,
+        ),
+      )
+
+    const userProfileData =
+      userProfileSnapshot.exists()
+        ? userProfileSnapshot.data()
+        : {}
+
+    const savedLeagueIds =
+      Array.isArray(
+        userProfileData.leagueIds,
+      )
+        ? userProfileData.leagueIds.filter(
+            (
+              savedLeagueId,
+            ): savedLeagueId is string =>
+              typeof savedLeagueId ===
+              'string',
+          )
+        : []
+
+    const previouslyAssociatedWithLeague =
+      savedLeagueIds.includes(
+        leagueId,
+      )
+
     let existingMembership
 
     try {
@@ -7591,9 +7623,17 @@ function App() {
             user.uid,
           ),
         )
-    } catch (error) {
+        } catch (error) {
+      if (
+        previouslyAssociatedWithLeague
+      ) {
+        throw new Error(
+          'You were previously removed from this league. Ask a league admin to reinstate you.',
+        )
+      }
+
       /*
-       * A non-member is not allowed to read the league's member
+       * Brand-new users are not allowed to read the league's member
        * collection yet. Treat that as "not joined" and proceed
        * directly to the rules-authorized self-membership create.
        */
