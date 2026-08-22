@@ -2805,9 +2805,19 @@ function AdminPage({
         tiebreakerGameId = selectedTiebreakers[0].gameId
       }
 
-      if (currentWeek.published) {
+            if (currentWeek.published) {
         const confirmed = window.confirm(
           `Republish ${publishWeekLabel}? Latest ESPN lines will become the official betting lines for every game that has not kicked off. Existing picks will remain saved, and games that already started will not change.`,
+        )
+
+        if (!confirmed) {
+          return
+        }
+      } else {
+        const confirmed = window.confirm(
+          `Publish ${publishWeekLabel} with ${selectedGames.length} ${
+            selectedGames.length === 1 ? 'game' : 'games'
+          } at $${stakeAmount} per player? This will make the week available to players and send the new-week notification.`,
         )
 
         if (!confirmed) {
