@@ -624,12 +624,13 @@ async function processWeek(
           ),
         )
 
-      if (
+            if (
         result === 'ahead'
       ) {
         correct += 1
       } else if (
-        result === 'behind'
+        result === 'behind' ||
+        result === 'pending'
       ) {
         losses += 1
       } else if (

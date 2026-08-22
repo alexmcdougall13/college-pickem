@@ -1103,9 +1103,12 @@ function StandingsPage({
         const pick = weekPicks[game.gameId]?.[player.uid]
         const result = getPickAgainstSpreadStatus(game, pick)
 
-        if (result === 'ahead') {
+                if (result === 'ahead') {
           player.correct += 1
-        } else if (result === 'behind') {
+        } else if (
+          result === 'behind' ||
+          result === 'pending'
+        ) {
           player.losses += 1
         }
       }
