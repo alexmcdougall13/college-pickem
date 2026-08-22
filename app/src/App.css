@@ -102,7 +102,7 @@ h2 {
   position: fixed;
   left: 50%;
   bottom: 0;
-  z-index: 10;
+  z-index: 100;
   display: grid;
 grid-template-columns: repeat(auto-fit, minmax(0, 1fr));  width: min(100%, 480px);
   padding: 10px 8px calc(10px + env(safe-area-inset-bottom));
@@ -739,9 +739,7 @@ button.team-card:active {
 
   background: #f8fafc;
 
-  box-shadow:
-    1px 0 0 #e7ebf1,
-    0 1px 0 #e7ebf1;
+  box-shadow: 1px 0 0 #e7ebf1;
 }
 
 /*
@@ -805,13 +803,103 @@ button.team-card:active {
 
 :root[data-theme='dark']
 .sticky-grid-corner {
-  box-shadow:
-    1px 0 0 #29364a,
-    0 1px 0 #29364a;
+  box-shadow: 1px 0 0 #29364a;
 }
 
 :root[data-theme='dark']
 .sticky-grid-first-column {
   box-shadow:
     1px 0 0 #29364a;
+}
+
+/* ===== Frozen current-user column ===== */
+
+.sticky-current-user-header {
+  position: sticky !important;
+  left: 124px;
+  z-index: 38 !important;
+  background: #f8fafc !important;
+  box-shadow:
+    1px 0 0 #e7ebf1,
+    -1px 0 0 #e7ebf1;
+}
+
+.sticky-current-user-cell {
+  position: sticky;
+  left: 124px;
+  z-index: 19;
+  background: #fff;
+  box-shadow:
+    1px 0 0 #edf0f5,
+    -1px 0 0 #edf0f5;
+}
+
+.pick-grid-header .sticky-current-user-header {
+  z-index: 39 !important;
+}
+
+:root[data-theme='dark'] .sticky-current-user-header {
+  background: #162033 !important;
+  color: #f1f5f9 !important;
+  box-shadow:
+    1px 0 0 #29364a,
+    -1px 0 0 #29364a;
+}
+
+:root[data-theme='dark'] .sticky-current-user-cell {
+  background: #111a2b !important;
+  color: #f1f5f9 !important;
+  box-shadow:
+    1px 0 0 #29364a,
+    -1px 0 0 #29364a;
+}
+
+/* ===== Consistent dark-mode grid dividers ===== */
+
+/*
+ * Use the same muted divider throughout Home and History.
+ * This overrides light inline border colors on player cells.
+ */
+:root[data-theme='dark'] .pick-grid-scroll [style*="border-left"] {
+  border-left-color: #29364a !important;
+}
+
+/*
+ * Keep the frozen Game and current-user column separators
+ * consistent with the rest of the grid.
+ */
+:root[data-theme='dark'] .sticky-grid-first-column,
+:root[data-theme='dark'] .sticky-current-user-cell {
+  box-shadow: 1px 0 0 #29364a;
+}
+
+:root[data-theme='dark'] .sticky-grid-corner,
+:root[data-theme='dark'] .sticky-current-user-header {
+  box-shadow: 1px 0 0 #29364a;
+}
+
+/* ===== Consistent dark-mode horizontal game dividers ===== */
+
+/*
+ * Match horizontal row separators to the same muted gray
+ * used for the vertical player-column dividers.
+ */
+:root[data-theme='dark'] .pick-grid-scroll [style*="border-bottom"] {
+  border-bottom-color: #29364a !important;
+}
+
+/*
+ * Some game rows use a top border instead of a bottom border.
+ * Normalize those as well.
+ */
+:root[data-theme='dark'] .pick-grid-scroll [style*="border-top"] {
+  border-top-color: #29364a !important;
+}
+
+/*
+ * Keep the sticky header divider consistent too.
+ */
+:root[data-theme='dark'] .pick-grid-header {
+  border-bottom-color: #29364a !important;
+  box-shadow: 0 1px 0 #29364a;
 }

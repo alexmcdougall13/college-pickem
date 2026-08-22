@@ -480,12 +480,12 @@ function HomePage({
   }
 
   const tiebreakerGame = games.find((game) => game.tiebreaker) ?? null
-  const playerColumnWidth = 86
-  const gameColumnWidth = 142
-  const picksGridMinWidth = Math.max(
-    440,
-    gameColumnWidth + orderedPlayers.length * playerColumnWidth,
-  )
+  const playerColumnWidth = 70
+  const gameColumnWidth = 124
+
+  const picksGridMinWidth =
+    gameColumnWidth +
+    orderedPlayers.length * playerColumnWidth
   const picksGridTemplate = `${gameColumnWidth}px repeat(${Math.max(
     orderedPlayers.length,
     1,
@@ -553,13 +553,32 @@ function HomePage({
                   {orderedPlayers.map((player) => (
                     <div
                       key={player.name}
-                      className="sticky-grid-header-cell"
+                      className={
+                        player.uid === currentUserId
+                          ? 'sticky-grid-header-cell sticky-current-user-header'
+                          : 'sticky-grid-header-cell'
+                      }
                       style={{
                         padding: '12px 6px',
                         textAlign: 'center',
                       }}
                     >
-                      <div style={{ fontWeight: 800, fontSize: 14 }}>
+                      <div
+                        style={{
+                          width: '100%',
+                          fontWeight: 800,
+                          fontSize:
+                            player.name.length >= 9
+                              ? 10
+                              : player.name.length >= 7
+                                ? 11
+                                : 13,
+                          lineHeight: 1.05,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                      >
                         {player.name}
                       </div>
                       <div
@@ -764,13 +783,18 @@ function HomePage({
                         return (
                           <div
                             key={`${game.gameId}-${player.name}`}
+                            className={
+                              player.uid === currentUserId
+                                ? 'sticky-current-user-cell'
+                                : undefined
+                            }
                             style={{
                               minHeight: 88,
                               borderLeft: '1px solid #edf0f5',
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
-                              padding: 8,
+                              padding: 4,
                             }}
                           >
                             {!canReveal ? (
@@ -793,8 +817,8 @@ function HomePage({
                               <div
                                 style={{
                                   position: 'relative',
-                                  width: 58,
-                                  minHeight: 68,
+                                  width: 54,
+                                  minHeight: 64,
                                   borderRadius: 14,
                                   background:
                                     correct
@@ -832,8 +856,8 @@ function HomePage({
                                   src={team.logo}
                                   alt={team.name}
                                   style={{
-                                    width: 34,
-                                    height: 34,
+                                    width: 30,
+                                    height: 30,
                                     objectFit: 'contain',
                                   }}
                                 />
@@ -917,6 +941,11 @@ function HomePage({
                       return (
                         <div
                           key={`tb-${player.name}`}
+                          className={
+                            player.uid === currentUserId
+                              ? 'sticky-current-user-cell'
+                              : undefined
+                          }
                           style={{
                             minHeight: 58,
                             borderLeft: '1px solid #edf0f5',
@@ -1551,13 +1580,12 @@ function HistoryPage({
       return a.name.localeCompare(b.name)
     })
 
-  const historyPlayerColumnWidth = 86
-  const historyGameColumnWidth = 142
-  const historyGridMinWidth = Math.max(
-    440,
+  const historyPlayerColumnWidth = 70
+  const historyGameColumnWidth = 124
+
+  const historyGridMinWidth =
     historyGameColumnWidth +
-      orderedPlayers.length * historyPlayerColumnWidth,
-  )
+    orderedPlayers.length * historyPlayerColumnWidth
   const historyGridTemplate = `${historyGameColumnWidth}px repeat(${Math.max(
     orderedPlayers.length,
     1,
@@ -1962,12 +1990,25 @@ function HistoryPage({
               {orderedPlayers.map((player) => (
                 <div
                   key={`history-header-${player.uid || player.name}`}
-                  className="sticky-grid-header-cell"
+                  className={
+                    player.uid === currentUserId
+                      ? 'sticky-grid-header-cell sticky-current-user-header'
+                      : 'sticky-grid-header-cell'
+                  }
                   style={{
-                    padding: '12px 6px',
+                    padding: '12px 4px',
                     textAlign: 'center',
                     fontWeight: 800,
-                    fontSize: 13,
+                    fontSize:
+                      player.name.length >= 9
+                        ? 10
+                        : player.name.length >= 7
+                          ? 11
+                          : 13,
+                    lineHeight: 1.05,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
                   }}
                 >
                   {player.name}
@@ -2051,6 +2092,11 @@ function HistoryPage({
                     return (
                       <div
                         key={`history-${game.gameId}-${player.uid || player.name}`}
+                        className={
+                          player.uid === currentUserId
+                            ? 'sticky-current-user-cell'
+                            : undefined
+                        }
                         style={{
                           minHeight: 82,
                           borderLeft: '1px solid #edf0f5',
