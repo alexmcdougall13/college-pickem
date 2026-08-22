@@ -395,7 +395,11 @@ function TeamCard({
         {team.name}
       </span>
 
-      <img src={team.logo} alt={`${team.name} logo`} />
+      <img
+        className="team-logo"
+        src={team.logo}
+        alt={`${team.name} logo`}
+      />
 
       <span className="team-line">{formatLine(team.line)}</span>
     </button>
@@ -418,7 +422,11 @@ function StaticTeamCard({
         {team.name}
       </span>
 
-      <img src={team.logo} alt={`${team.name} logo`} />
+      <img
+        className="team-logo"
+        src={team.logo}
+        alt={`${team.name} logo`}
+      />
     </div>
   )
 }
@@ -853,6 +861,7 @@ function HomePage({
                                 }}
                               >
                                 <img
+                                  className="team-logo"
                                   src={team.logo}
                                   alt={team.name}
                                   style={{
@@ -2138,6 +2147,7 @@ function HistoryPage({
                             }}
                           >
                             <img
+                              className="team-logo"
                               src={team.logo}
                               alt={team.name}
                               style={{

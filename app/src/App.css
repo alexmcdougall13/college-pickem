@@ -903,3 +903,10 @@ button.team-card:active {
   border-bottom-color: #29364a !important;
   box-shadow: 0 1px 0 #29364a;
 }
+
+/* Dark-mode team logo visibility */
+:root[data-theme='dark'] .team-logo {
+  filter:
+    drop-shadow(0 0 1px rgba(255, 255, 255, 0.55))
+    drop-shadow(0 0 4px rgba(255, 255, 255, 0.16));
+}
