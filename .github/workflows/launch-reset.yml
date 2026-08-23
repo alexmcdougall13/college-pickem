@@ -34,6 +34,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Back up launch-test data
+        env:
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
+          FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
+
+        run: node scripts/backup-before-launch.mjs
+
+      - name: Upload launch backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: pre-launch-firestore-backup
+          path: app/launch-backup.json
+          retention-days: 90
+
       - name: Launch reset
         env:
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
