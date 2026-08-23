@@ -748,7 +748,9 @@ async function sendUserReminder(
 
         notification: {
           title:
-            'College Pick’em — Picks Due Soon',
+            reminders.length === 1
+              ? 'Picks Due Soon'
+              : 'Picks Due Soon — Multiple Leagues',
 
           body,
         },
