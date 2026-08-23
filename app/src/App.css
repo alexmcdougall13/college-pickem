@@ -926,3 +926,17 @@ button.team-card:active {
 :root[data-theme='dark'] .result-pick-line {
   color: #f8fafc !important;
 }
+
+
+/* ===== Home tiebreaker sticky background ===== */
+
+.home-tiebreaker-row .sticky-current-user-cell {
+  background: #f8fafc !important;
+}
+
+:root[data-theme='dark']
+  .pick-grid-scroll
+  .home-tiebreaker-row
+  .sticky-current-user-cell {
+  background: #162033 !important;
+}

@@ -488,6 +488,15 @@ function HomePage({
   }
 
   const tiebreakerGame = games.find((game) => game.tiebreaker) ?? null
+
+  const tiebreakerCurrentTotal =
+    tiebreakerGame &&
+    tiebreakerGame.awayScore != null &&
+    tiebreakerGame.homeScore != null &&
+    isGameLocked(tiebreakerGame.kickoff)
+      ? tiebreakerGame.awayScore + tiebreakerGame.homeScore
+      : null
+
   const playerColumnWidth = 70
   const gameColumnWidth = 124
 
@@ -927,22 +936,77 @@ function HomePage({
 
                 {tiebreakerGame && (
                   <div
+                    className="home-tiebreaker-row"
                     style={{
                       display: 'grid',
                       gridTemplateColumns: picksGridTemplate,
-                      alignItems: 'center',
+                      alignItems: 'stretch',
                       background: '#f8fafc',
                     }}
                   >
                     <div
                       className="sticky-grid-first-column"
-                      style={{ padding: '14px 12px' }}
+                      style={{
+                        padding: '10px 8px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        textAlign: 'center',
+                        minHeight: 72,
+                      }}
                     >
-                      <div style={{ fontWeight: 800, fontSize: 13 }}>
+                      <div
+                        style={{
+                          fontWeight: 900,
+                          fontSize: 12,
+                          marginBottom: 5,
+                        }}
+                      >
                         Tiebreaker
                       </div>
-                      <div style={{ color: '#64748b', fontSize: 11, marginTop: 2 }}>
-                        Combined points
+
+                      <div
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 800,
+                          lineHeight: 1.2,
+                        }}
+                      >
+                        {tiebreakerGame.awayTeam.rank
+                          ? `#${tiebreakerGame.awayTeam.rank} ${tiebreakerGame.awayTeam.name}`
+                          : tiebreakerGame.awayTeam.name}
+                        <br />
+                        at{' '}
+                        {tiebreakerGame.homeTeam.rank
+                          ? `#${tiebreakerGame.homeTeam.rank} ${tiebreakerGame.homeTeam.name}`
+                          : tiebreakerGame.homeTeam.name}
+                      </div>
+
+                      {isGameLocked(tiebreakerGame.kickoff) &&
+                        tiebreakerGame.awayScore != null &&
+                        tiebreakerGame.homeScore != null && (
+                          <div
+                            style={{
+                              marginTop: 4,
+                              fontSize: 11,
+                              fontWeight: 900,
+                            }}
+                          >
+                            {tiebreakerGame.awayScore} -{' '}
+                            {tiebreakerGame.homeScore}
+                          </div>
+                        )}
+
+                      <div
+                        style={{
+                          marginTop: 4,
+                          color: '#64748b',
+                          fontSize: 9,
+                          lineHeight: 1.15,
+                        }}
+                      >
+                        {getHomeGameStatus(tiebreakerGame)}
                       </div>
                     </div>
 
@@ -972,7 +1036,37 @@ function HomePage({
                             fontWeight: 800,
                           }}
                         >
-                          {reveal ? (value ?? '—') : '🔒'}
+                          {!reveal ? (
+                            '🔒'
+                          ) : value == null ? (
+                            '—'
+                          ) : (
+                            <div
+                              style={{
+                                textAlign: 'center',
+                                lineHeight: 1,
+                              }}
+                            >
+                              <div>{value}</div>
+
+                              {tiebreakerCurrentTotal != null && (
+                                <div
+                                  style={{
+                                    marginTop: 5,
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    color: '#64748b',
+                                  }}
+                                >
+                                  (
+                                  {tiebreakerCurrentTotal - value > 0
+                                    ? '+'
+                                    : ''}
+                                  {tiebreakerCurrentTotal - value})
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )
                     })}
@@ -1285,6 +1379,20 @@ function StandingsPage({
     currentWeekData!.games.length > 0 &&
     currentWeekData!.games.every((game) => game.final)
 
+  const currentTiebreakerGame =
+    currentWeekData?.games.find(
+      (game) => game.tiebreaker,
+    ) ?? null
+
+  const currentTiebreakerActual =
+    currentTiebreakerGame &&
+    currentTiebreakerGame.awayScore != null &&
+    currentTiebreakerGame.homeScore != null &&
+    isGameLocked(currentTiebreakerGame.kickoff)
+      ? currentTiebreakerGame.awayScore +
+        currentTiebreakerGame.homeScore
+      : null
+
   function formatMoney(value: number) {
     if (value > 0) {
       return `+$${value.toFixed(value % 1 === 0 ? 0 : 2)}`
@@ -1521,7 +1629,32 @@ function StandingsPage({
               {currentAllFinal
                 ? row.tiebreaker == null
                   ? '—'
-                  : `TB ${row.tiebreaker}`
+                  : (
+                    <div
+                      style={{
+                        textAlign: 'center',
+                        lineHeight: 1,
+                      }}
+                    >
+                      <div>{row.tiebreaker}</div>
+
+                      {currentTiebreakerActual != null && (
+                        <div
+                          style={{
+                            marginTop: 5,
+                            fontSize: 10,
+                            fontWeight: 700,
+                          }}
+                        >
+                          (
+                          {currentTiebreakerActual - row.tiebreaker > 0
+                            ? '+'
+                            : ''}
+                          {currentTiebreakerActual - row.tiebreaker})
+                        </div>
+                      )}
+                    </div>
+                  )
                 : row.remaining == null
                   ? '—'
                   : `${row.remaining} left`}
@@ -1642,6 +1775,14 @@ function HistoryPage({
 
   const tiebreakerGame =
     selectedWeek.games.find((game) => game.tiebreaker) ?? null
+
+  const historicalTiebreakerTotal =
+    tiebreakerGame &&
+    tiebreakerGame.awayScore != null &&
+    tiebreakerGame.homeScore != null &&
+    isGameLocked(tiebreakerGame.kickoff)
+      ? tiebreakerGame.awayScore + tiebreakerGame.homeScore
+      : null
 
   const weekRows = orderedPlayers
     .map((player) => {
@@ -2241,30 +2382,73 @@ function HistoryPage({
                 style={{
                   display: 'grid',
                   gridTemplateColumns: historyGridTemplate,
-                  alignItems: 'center',
+                  alignItems: 'stretch',
                   background: '#f8fafc',
                 }}
               >
                 <div
                   className="sticky-grid-first-column"
-                  style={{ padding: '14px 12px' }}
+                  style={{
+                    padding: '10px 8px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    textAlign: 'center',
+                    minHeight: 72,
+                  }}
                 >
                   <div
                     style={{
-                      fontWeight: 800,
-                      fontSize: 13,
+                      fontWeight: 900,
+                      fontSize: 12,
+                      marginBottom: 5,
                     }}
                   >
                     Tiebreaker
                   </div>
+
                   <div
                     style={{
-                      color: '#64748b',
-                      fontSize: 11,
-                      marginTop: 2,
+                      fontSize: 10,
+                      fontWeight: 800,
+                      lineHeight: 1.2,
                     }}
                   >
-                    Combined points
+                    {tiebreakerGame.awayTeam.rank
+                      ? `#${tiebreakerGame.awayTeam.rank} ${tiebreakerGame.awayTeam.name}`
+                      : tiebreakerGame.awayTeam.name}
+                    <br />
+                    at{' '}
+                    {tiebreakerGame.homeTeam.rank
+                      ? `#${tiebreakerGame.homeTeam.rank} ${tiebreakerGame.homeTeam.name}`
+                      : tiebreakerGame.homeTeam.name}
+                  </div>
+
+                  {isGameLocked(tiebreakerGame.kickoff) &&
+                    tiebreakerGame.awayScore != null &&
+                    tiebreakerGame.homeScore != null && (
+                      <div
+                        style={{
+                          marginTop: 4,
+                          fontSize: 11,
+                          fontWeight: 900,
+                        }}
+                      >
+                        {tiebreakerGame.awayScore} -{' '}
+                        {tiebreakerGame.homeScore}
+                      </div>
+                    )}
+
+                  <div
+                    style={{
+                      marginTop: 4,
+                      color: '#64748b',
+                      fontSize: 9,
+                      lineHeight: 1.15,
+                    }}
+                  >
+                    {formatHistoricalStatus(tiebreakerGame)}
                   </div>
                 </div>
 
@@ -2289,7 +2473,37 @@ function HistoryPage({
                         fontWeight: 800,
                       }}
                     >
-                      {reveal ? (value ?? '—') : '🔒'}
+                      {!reveal ? (
+                          '🔒'
+                        ) : value == null ? (
+                          '—'
+                        ) : (
+                          <div
+                            style={{
+                              textAlign: 'center',
+                              lineHeight: 1,
+                            }}
+                          >
+                            <div>{value}</div>
+
+                            {historicalTiebreakerTotal != null && (
+                              <div
+                                style={{
+                                  marginTop: 5,
+                                  fontSize: 10,
+                                  fontWeight: 700,
+                                  color: '#64748b',
+                                }}
+                              >
+                                (
+                                {historicalTiebreakerTotal - value > 0
+                                  ? '+'
+                                  : ''}
+                                {historicalTiebreakerTotal - value})
+                              </div>
+                            )}
+                          </div>
+                        )}
                     </div>
                   )
                 })}
@@ -8636,6 +8850,123 @@ function App() {
     const nextWeekNumber = currentWeek.weekNumber + 1
     const nextWeekId = makeWeekId(nextWeekNumber)
     const nextWeekLabel = `Week ${nextWeekNumber}`
+
+    /*
+     * Load the upcoming ESPN week before advancing the league.
+     *
+     * This means that when the Admin screen switches to the new
+     * week, its available games are already waiting in Firestore.
+     * If the ESPN refresh fails, the league remains on the current
+     * week instead of advancing into a partially loaded week.
+     */
+    const syncingUser = auth.currentUser
+
+    if (!syncingUser) {
+      throw new Error(
+        'You must be signed in to start the next week.',
+      )
+    }
+
+    const token =
+      await syncingUser.getIdToken()
+
+    const syncResponse =
+      await fetch(
+        `${ESPN_SYNC_WORKER_URL}/refresh`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            leagueId: activeLeague!.id,
+            mode: 'week',
+            season: SEASON,
+            value: String(nextWeekNumber),
+          }),
+        },
+      )
+
+    const syncResult =
+      await syncResponse.json()
+
+    if (
+      !syncResponse.ok ||
+      syncResult?.ok !== true
+    ) {
+      throw new Error(
+        syncResult?.error ??
+          `Unable to load ESPN data for ${nextWeekLabel}.`,
+      )
+    }
+
+    const triggeredAt =
+      typeof syncResult.triggeredAt === 'string'
+        ? syncResult.triggeredAt
+        : new Date().toISOString()
+
+    const syncDeadline =
+      Date.now() + 3 * 60 * 1000
+
+    let syncComplete = false
+
+    while (Date.now() < syncDeadline) {
+      await new Promise((resolve) =>
+        window.setTimeout(resolve, 2500),
+      )
+
+      const statusResponse =
+        await fetch(
+          `${ESPN_SYNC_WORKER_URL}/status?leagueId=${encodeURIComponent(
+            activeLeague!.id,
+          )}&since=${encodeURIComponent(triggeredAt)}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          },
+        )
+
+      const statusResult =
+        await statusResponse.json()
+
+      if (!statusResponse.ok) {
+        throw new Error(
+          statusResult?.error ??
+            `Unable to check ESPN sync for ${nextWeekLabel}.`,
+        )
+      }
+
+      if (
+        statusResult.status === 'queued' ||
+        statusResult.status === 'waiting' ||
+        statusResult.status === 'running'
+      ) {
+        continue
+      }
+
+      if (statusResult.status === 'failed') {
+        throw new Error(
+          `ESPN refresh for ${nextWeekLabel} failed${
+            statusResult.conclusion
+              ? ` (${statusResult.conclusion})`
+              : ''
+          }.`,
+        )
+      }
+
+      if (statusResult.status === 'success') {
+        syncComplete = true
+        break
+      }
+    }
+
+    if (!syncComplete) {
+      throw new Error(
+        `ESPN refresh for ${nextWeekLabel} is taking longer than expected.`,
+      )
+    }
 
     await setDoc(
       doc(db, 'leagues', activeLeague!.id, 'weeks', currentWeek.weekId),
