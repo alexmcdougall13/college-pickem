@@ -1,6 +1,3 @@
-cd /workspaces/college-pickem
-
-cat > app/scripts/send-week-published-notification.mjs <<'EOF'
 import {
   cert,
   initializeApp,
