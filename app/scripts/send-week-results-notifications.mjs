@@ -854,15 +854,15 @@ async function processWeek(
     winners.length === 1
   ) {
     body =
-      `${winnerNames[0]} won ${weekLabel} with ${winningRecord.correct}-${winningRecord.losses}`
+      `${winnerNames[0]} won ${weekLabel} going ${winningRecord.correct}-${winningRecord.losses}`
   } else if (
     winners.length === 2
   ) {
     body =
-      `${winnerNames[0]} and ${winnerNames[1]} split ${weekLabel} with ${winningRecord.correct}-${winningRecord.losses}`
+      `${winnerNames[0]} and ${winnerNames[1]} split ${weekLabel} going ${winningRecord.correct}-${winningRecord.losses}`
   } else {
     body =
-      `${winners.length} players split ${weekLabel} with ${winningRecord.correct}-${winningRecord.losses}`
+      `${winners.length} players split ${weekLabel} going ${winningRecord.correct}-${winningRecord.losses}`
   }
 
   let usersNotified = 0
