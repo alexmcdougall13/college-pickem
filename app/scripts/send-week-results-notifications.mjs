@@ -319,6 +319,40 @@ async function displayNameForMember(
   return 'Player'
 }
 
+async function activeLeagueCountForUser(
+  userId,
+) {
+  const leaguesSnapshot =
+    await db
+      .collection('leagues')
+      .get()
+
+  let count = 0
+
+  for (
+    const leagueDocument of
+    leaguesSnapshot.docs
+  ) {
+    const memberSnapshot =
+      await db
+        .collection('leagues')
+        .doc(leagueDocument.id)
+        .collection('members')
+        .doc(userId)
+        .get()
+
+    if (
+      memberSnapshot.exists &&
+      memberSnapshot.data()
+        .active !== false
+    ) {
+      count += 1
+    }
+  }
+
+  return count
+}
+
 async function enabledFidsForUser(
   userId,
 ) {
@@ -820,15 +854,15 @@ async function processWeek(
     winners.length === 1
   ) {
     body =
-      `${winnerNames[0]} won ${weekLabel} with ${winningRecord.correct}-${winningRecord.losses}.`
+      `${winnerNames[0]} won ${weekLabel} with ${winningRecord.correct}-${winningRecord.losses}`
   } else if (
     winners.length === 2
   ) {
     body =
-      `${winnerNames[0]} and ${winnerNames[1]} split ${weekLabel} with ${winningRecord.correct}-${winningRecord.losses}.`
+      `${winnerNames[0]} and ${winnerNames[1]} split ${weekLabel} with ${winningRecord.correct}-${winningRecord.losses}`
   } else {
     body =
-      `${winners.length} players split ${weekLabel} with ${winningRecord.correct}-${winningRecord.losses}.`
+      `${winners.length} players split ${weekLabel} with ${winningRecord.correct}-${winningRecord.losses}`
   }
 
   let usersNotified = 0
@@ -875,6 +909,16 @@ async function processWeek(
       continue
     }
 
+    const activeLeagueCount =
+      await activeLeagueCountForUser(
+        userId,
+      )
+
+    const resultTitle =
+      activeLeagueCount > 1
+        ? `${leagueName} — ${weekLabel} Results`
+        : `${weekLabel} Results`
+
     const response =
       await messaging
         .sendEachForMulticast({
@@ -883,8 +927,10 @@ async function processWeek(
           notification: {
             title:
               TEST_MODE
-                ? `${leagueName} — TEST Results`
-                : `${leagueName} — ${weekLabel} Results`,
+                ? activeLeagueCount > 1
+                  ? `${leagueName} — TEST Results`
+                  : 'TEST Results'
+                : resultTitle,
 
             body,
           },
