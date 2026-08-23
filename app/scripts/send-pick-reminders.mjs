@@ -304,7 +304,7 @@ function buildBody(
       } due soon`
     }
 
-    return `${body}.`
+    return `${body} in ${reminder.leagueName}.`
   }
 
   return `You still have picks due soon in ${reminders.length} leagues.`
