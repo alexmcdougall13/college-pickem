@@ -46,6 +46,24 @@ type NotificationPreferences = {
   weekResults: boolean
 }
 
+type BugReport = {
+  reportId: string
+  userId: string
+  userEmail: string
+  reporterDisplayName: string
+  leagueId: string
+  leagueName: string
+  description: string
+  submittedFromTab?: string
+  lastAppTab?: string
+  userAgent?: string
+  screenWidth?: number
+  screenHeight?: number
+  createdAt?: Timestamp
+  status: 'new' | 'resolved'
+  resolvedAt?: Timestamp
+}
+
 const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   weekPublished: true,
   pickReminders: true,
@@ -4210,6 +4228,10 @@ function SettingsPage({
 }) {
   const [bugDescription, setBugDescription] = useState('')
   const [bugSubmitting, setBugSubmitting] = useState(false)
+  const [bugReports, setBugReports] = useState<BugReport[]>([])
+  const [bugReportsLoading, setBugReportsLoading] = useState(false)
+  const [bugReportActionId, setBugReportActionId] =
+    useState<string | null>(null)
   const [bugMessage, setBugMessage] = useState('')
   const [bugError, setBugError] = useState('')
 
@@ -4622,6 +4644,186 @@ function SettingsPage({
     },
   ]
 
+  useEffect(() => {
+    if (
+      user.uid !== PLATFORM_OWNER_UID
+    ) {
+      return
+    }
+
+    let cancelled = false
+
+    async function loadBugReports() {
+      setBugReportsLoading(true)
+
+      try {
+        const snapshot =
+          await getDocs(
+            collection(
+              db,
+              'bugReports',
+            ),
+          )
+
+        const reports =
+          snapshot.docs
+            .map((document) => {
+              const data =
+                document.data()
+
+              return {
+                reportId:
+                  String(
+                    data.reportId ??
+                      document.id,
+                  ),
+                userId:
+                  String(
+                    data.userId ?? '',
+                  ),
+                userEmail:
+                  String(
+                    data.userEmail ?? '',
+                  ),
+                reporterDisplayName:
+                  String(
+                    data.reporterDisplayName ??
+                      data.userEmail ??
+                      '',
+                  ),
+                leagueId:
+                  String(
+                    data.leagueId ?? '',
+                  ),
+                leagueName:
+                  String(
+                    data.leagueName ?? '',
+                  ),
+                description:
+                  String(
+                    data.description ?? '',
+                  ),
+                submittedFromTab:
+                  typeof data.submittedFromTab === 'string'
+                    ? data.submittedFromTab
+                    : undefined,
+                lastAppTab:
+                  typeof data.lastAppTab === 'string'
+                    ? data.lastAppTab
+                    : undefined,
+                userAgent:
+                  typeof data.userAgent === 'string'
+                    ? data.userAgent
+                    : undefined,
+                screenWidth:
+                  typeof data.screenWidth === 'number'
+                    ? data.screenWidth
+                    : undefined,
+                screenHeight:
+                  typeof data.screenHeight === 'number'
+                    ? data.screenHeight
+                    : undefined,
+                createdAt:
+                  data.createdAt instanceof Timestamp
+                    ? data.createdAt
+                    : undefined,
+                status:
+                  data.status === 'resolved'
+                    ? 'resolved'
+                    : 'new',
+                resolvedAt:
+                  data.resolvedAt instanceof Timestamp
+                    ? data.resolvedAt
+                    : undefined,
+              } satisfies BugReport
+            })
+            .sort((a, b) => {
+              if (
+                a.status !== b.status
+              ) {
+                return a.status === 'new'
+                  ? -1
+                  : 1
+              }
+
+              const aTime =
+                a.createdAt?.toMillis() ?? 0
+              const bTime =
+                b.createdAt?.toMillis() ?? 0
+
+              return bTime - aTime
+            })
+
+        if (!cancelled) {
+          setBugReports(reports)
+        }
+      } catch (error) {
+        console.error(
+          'Unable to load bug reports:',
+          error,
+        )
+      } finally {
+        if (!cancelled) {
+          setBugReportsLoading(false)
+        }
+      }
+    }
+
+    loadBugReports()
+
+    return () => {
+      cancelled = true
+    }
+  }, [user.uid])
+
+  async function resolveBugReport(
+    reportId: string,
+  ) {
+    setBugReportActionId(reportId)
+
+    try {
+      await setDoc(
+        doc(
+          db,
+          'bugReports',
+          reportId,
+        ),
+        {
+          status:
+            'resolved',
+          resolvedAt:
+            serverTimestamp(),
+          resolvedBy:
+            user.uid,
+        },
+        {
+          merge: true,
+        },
+      )
+
+      setBugReports(
+        (current) =>
+          current.map(
+            (report) =>
+              report.reportId === reportId
+                ? {
+                    ...report,
+                    status:
+                      'resolved',
+                  }
+                : report,
+          ),
+      )
+    } catch (error) {
+      console.error(
+        'Unable to resolve bug report:',
+        error,
+      )
+    } finally {
+      setBugReportActionId(null)
+    }
+  }
+
   async function handleBugReport(
     event: React.FormEvent<HTMLFormElement>,
   ) {
@@ -4661,6 +4863,11 @@ function SettingsPage({
 
           userEmail:
             user.email ?? '',
+
+          reporterDisplayName:
+            currentLeaguePlayer?.name ??
+            user.email ??
+            'Unknown user',
 
           leagueId:
             activeLeague.id,
@@ -6050,6 +6257,238 @@ function SettingsPage({
             </p>
           )}
         </form>
+
+        {user.uid === PLATFORM_OWNER_UID && (
+          <div
+            style={{
+              marginTop: 22,
+              paddingTop: 18,
+              borderTop:
+                '1px solid #edf0f5',
+            }}
+          >
+            <h3
+              style={{
+                marginBottom: 6,
+              }}
+            >
+              Bug Reports
+            </h3>
+
+            <p
+              style={{
+                margin: '0 0 12px',
+                color:
+                  'var(--theme-muted, #64748b)',
+                fontSize: 12,
+              }}
+            >
+              Review reports submitted by players.
+            </p>
+
+            {bugReportsLoading ? (
+              <p
+                style={{
+                  fontSize: 12,
+                  color:
+                    'var(--theme-muted, #64748b)',
+                }}
+              >
+                Loading bug reports…
+              </p>
+            ) : bugReports.length === 0 ? (
+              <p
+                style={{
+                  fontSize: 12,
+                  color:
+                    'var(--theme-muted, #64748b)',
+                }}
+              >
+                No bug reports have been submitted.
+              </p>
+            ) : (
+              <div
+                style={{
+                  display: 'grid',
+                  gap: 10,
+                }}
+              >
+                {bugReports.map((report) => (
+                  <div
+                    key={report.reportId}
+                    style={{
+                      padding: 12,
+                      border:
+                        '1px solid #d9e0ea',
+                      borderRadius: 10,
+                      opacity:
+                        report.status === 'resolved'
+                          ? 0.65
+                          : 1,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent:
+                          'space-between',
+                        gap: 10,
+                        alignItems:
+                          'flex-start',
+                      }}
+                    >
+                      <div>
+                        <strong>
+                          {report.reporterDisplayName ||
+                            report.userEmail ||
+                            'Unknown user'}
+                        </strong>
+
+                        <div
+                          style={{
+                            marginTop: 3,
+                            color:
+                              'var(--theme-muted, #64748b)',
+                            fontSize: 11,
+                          }}
+                        >
+                          {report.leagueName ||
+                            'Unknown league'}
+                          {report.lastAppTab
+                            ? ` · ${report.lastAppTab}`
+                            : ''}
+                        </div>
+                      </div>
+
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 800,
+                          textTransform:
+                            'uppercase',
+                          color:
+                            'var(--theme-muted, #64748b)',
+                        }}
+                      >
+                        {report.status}
+                      </span>
+                    </div>
+
+                    <p
+                      style={{
+                        margin:
+                          '10px 0 0',
+                        fontSize: 13,
+                        lineHeight: 1.4,
+                        whiteSpace:
+                          'pre-wrap',
+                      }}
+                    >
+                      {report.description}
+                    </p>
+
+                    <div
+                      style={{
+                        marginTop: 10,
+                        color:
+                          'var(--theme-muted, #64748b)',
+                        fontSize: 10,
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      {report.createdAt
+                        ? report.createdAt
+                            .toDate()
+                            .toLocaleString(
+                              undefined,
+                              {
+                                year: 'numeric',
+                                month: 'numeric',
+                                day: 'numeric',
+                                hour: 'numeric',
+                                minute: '2-digit',
+                              },
+                            )
+                        : 'Time unavailable'}
+                    </div>
+
+                    {report.status === 'new' && (
+                      <button
+                        type="button"
+                        disabled={
+                          bugReportActionId !==
+                          null
+                        }
+                        onClick={() =>
+                          resolveBugReport(
+                            report.reportId,
+                          )
+                        }
+                        style={{
+                          width: '100%',
+                          marginTop: 10,
+                          padding:
+                            '8px 10px',
+                          border:
+                            '1px solid #cbd5e1',
+                          borderRadius: 8,
+                          background:
+                            'transparent',
+                          color: 'inherit',
+                          font: 'inherit',
+                          fontSize: 12,
+                          fontWeight: 800,
+                          cursor:
+                            bugReportActionId
+                              ? 'wait'
+                              : 'pointer',
+                        }}
+                      >
+                        {bugReportActionId ===
+                        report.reportId
+                          ? 'Updating…'
+                          : 'Mark Resolved'}
+                      </button>
+                    )}
+
+                    {report.userAgent && (
+                      <details
+                        style={{
+                          marginTop: 10,
+                        }}
+                      >
+                        <summary
+                          style={{
+                            cursor:
+                              'pointer',
+                            fontSize: 11,
+                            fontWeight: 800,
+                          }}
+                        >
+                          Device details
+                        </summary>
+
+                        <div
+                          style={{
+                            marginTop: 6,
+                            color:
+                              'var(--theme-muted, #64748b)',
+                            fontSize: 10,
+                            lineHeight: 1.4,
+                            overflowWrap:
+                              'anywhere',
+                          }}
+                        >
+                          {report.userAgent}
+                        </div>
+                      </details>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="settings-card account-settings-card">

@@ -439,7 +439,18 @@ service cloud.firestore {
 
       allow read: if isPlatformOwner();
 
-      allow update, delete: if false;
+      allow update: if isPlatformOwner()
+                    && request.resource.data
+                      .diff(resource.data)
+                      .affectedKeys()
+                      .hasOnly([
+                        'status',
+                        'resolvedAt',
+                        'resolvedBy'
+                      ])
+                    && request.resource.data.status == 'resolved';
+
+      allow delete: if false;
     }
 
 
