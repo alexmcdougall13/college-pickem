@@ -673,7 +673,9 @@ function HomePage({
                                 letterSpacing: '-0.01em',
                               }}
                             >
-                              {game.awayTeam.name}
+                              {game.awayTeam.rank
+                                ? `#${game.awayTeam.rank} ${game.awayTeam.name}`
+                                : game.awayTeam.name}
                             </div>
 
                             {(game.statusState === 'in' || game.final) &&
@@ -715,7 +717,10 @@ function HomePage({
                                 letterSpacing: '-0.01em',
                               }}
                             >
-                              at {game.homeTeam.name}
+                              at{' '}
+                              {game.homeTeam.rank
+                                ? `#${game.homeTeam.rank} ${game.homeTeam.name}`
+                                : game.homeTeam.name}
                             </div>
 
                             {(game.statusState === 'in' || game.final) &&
@@ -1866,7 +1871,13 @@ function HistoryPage({
           </span>
         </div>
 
-        {weekRows.map((row, index) => (
+        {weekRows.map((row, index) => {
+          const netPayout =
+            winnerIds.has(row.player.uid)
+              ? payoutPerWinner - selectedWeek.week.stake
+              : -selectedWeek.week.stake
+
+          return (
           <div
             key={`history-summary-${row.player.uid || row.player.name}`}
             style={{
@@ -1897,9 +1908,11 @@ function HistoryPage({
             <span
               className={
                 allGamesFinal
-                  ? winnerIds.has(row.player.uid)
+                  ? netPayout > 0
                     ? 'money-positive'
-                    : 'money-negative'
+                    : netPayout < 0
+                      ? 'money-negative'
+                      : ''
                   : ''
               }
               style={{
@@ -1912,17 +1925,20 @@ function HistoryPage({
               }}
             >
               {allGamesFinal
-                ? winnerIds.has(row.player.uid)
-                  ? `+$${(payoutPerWinner - selectedWeek.week.stake).toFixed(
-                      (payoutPerWinner - selectedWeek.week.stake) % 1 === 0
-                        ? 0
-                        : 2,
+                ? netPayout > 0
+                  ? `+$${netPayout.toFixed(
+                      netPayout % 1 === 0 ? 0 : 2,
                     )}`
-                  : `-$${selectedWeek.week.stake}`
+                  : netPayout < 0
+                    ? `-$${Math.abs(netPayout).toFixed(
+                        Math.abs(netPayout) % 1 === 0 ? 0 : 2,
+                      )}`
+                    : '$0'
                 : '—'}
             </span>
           </div>
-        ))}
+          )
+        })}
 
         {allGamesFinal && (
           <div
@@ -2058,9 +2074,14 @@ function HistoryPage({
                         lineHeight: 1.2,
                       }}
                     >
-                      {game.awayTeam.name}
+                      {game.awayTeam.rank
+                        ? `#${game.awayTeam.rank} ${game.awayTeam.name}`
+                        : game.awayTeam.name}
                       <br />
-                      at {game.homeTeam.name}
+                      at{' '}
+                      {game.homeTeam.rank
+                        ? `#${game.homeTeam.rank} ${game.homeTeam.name}`
+                        : game.homeTeam.name}
                     </strong>
 
                     {(game.statusState === 'in' || game.final) &&
