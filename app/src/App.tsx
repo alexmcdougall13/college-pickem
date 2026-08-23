@@ -823,6 +823,7 @@ function HomePage({
                               </div>
                             ) : team ? (
                               <div
+                                className="result-pick-card"
                                 style={{
                                   position: 'relative',
                                   width: 54,
@@ -872,6 +873,7 @@ function HomePage({
                                 />
 
                                 <div
+                                  className="result-pick-line"
                                   style={{
                                     marginTop: 3,
                                     fontSize: 11,
@@ -2119,6 +2121,7 @@ function HistoryPage({
                           <span>🔒</span>
                         ) : team ? (
                           <div
+                            className="result-pick-card"
                             style={{
                               position: 'relative',
                               width: 56,
@@ -2157,6 +2160,7 @@ function HistoryPage({
                               }}
                             />
                             <span
+                              className="result-pick-line"
                               style={{
                                 marginTop: 3,
                                 fontSize: 11,

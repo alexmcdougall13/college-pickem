@@ -910,3 +910,19 @@ button.team-card:active {
     drop-shadow(0 0 1px rgba(255, 255, 255, 0.55))
     drop-shadow(0 0 4px rgba(255, 255, 255, 0.16));
 }
+
+
+/* ===== Dark-mode result pick cards ===== */
+
+/*
+ * Keep pick cards visually consistent in dark mode.
+ * Final/live state is communicated by the border/check,
+ * not by switching to a light card background.
+ */
+:root[data-theme='dark'] .result-pick-card {
+  background: #111a2b !important;
+}
+
+:root[data-theme='dark'] .result-pick-line {
+  color: #f8fafc !important;
+}
