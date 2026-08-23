@@ -1,4 +1,11 @@
-import admin from 'firebase-admin'
+import {
+  cert,
+  initializeApp,
+} from 'firebase-admin/app'
+
+import {
+  getFirestore,
+} from 'firebase-admin/firestore'
 
 const EXECUTE =
   process.argv.includes('--execute')
@@ -25,14 +32,15 @@ if (
   )
 }
 
-admin.initializeApp({
+initializeApp({
   credential:
-    admin.credential.cert(
+    cert(
       serviceAccount,
     ),
 })
 
-const db = admin.firestore()
+const db =
+  getFirestore()
 
 const TOP_LEVEL_COLLECTIONS = [
   'leagues',
