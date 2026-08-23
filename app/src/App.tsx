@@ -3377,8 +3377,6 @@ function AdminPage({
             lineHeight: 1.45,
           }}
         >
-          ESPN data is shared across leagues, but each league&apos;s
-          selections and published betting lines are independent.
           Published lines stay frozen until you explicitly republish.
         </p>
 
@@ -3426,8 +3424,6 @@ function AdminPage({
                   minute: '2-digit',
                 })}.`
               : 'ESPN data has not been synced yet.'}
-          {' '}The refresh now runs entirely inside the app and reloads
-          the Admin list automatically when the sync finishes.
         </p>
       </section>
 
