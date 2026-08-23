@@ -419,6 +419,31 @@ service cloud.firestore {
 
 
     // =========================================================
+    // BUG REPORTS
+    // =========================================================
+    //
+    // Signed-in users may submit bug reports only for
+    // themselves. Reports cannot be edited or deleted from
+    // the browser after submission.
+    //
+    // The platform owner may read reports for support.
+
+    match /bugReports/{reportId} {
+      allow create: if signedIn()
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.reportId == reportId
+                    && request.resource.data.description is string
+                    && request.resource.data.description.size() > 0
+                    && request.resource.data.description.size() <= 2000
+                    && request.resource.data.status == 'new';
+
+      allow read: if isPlatformOwner();
+
+      allow update, delete: if false;
+    }
+
+
+    // =========================================================
     // SHARED ESPN GAME FEED
     // =========================================================
     //

@@ -4172,6 +4172,7 @@ function SettingsPage({
   onNotificationPreferenceChange,
   onEnableNotifications,
   onDisableNotifications,
+  lastAppTab,
 }: {
   user: User
   isAdmin: boolean
@@ -4205,7 +4206,13 @@ function SettingsPage({
   ) => Promise<void>
   onEnableNotifications: () => Promise<void>
   onDisableNotifications: () => Promise<void>
+  lastAppTab: Tab
 }) {
+  const [bugDescription, setBugDescription] = useState('')
+  const [bugSubmitting, setBugSubmitting] = useState(false)
+  const [bugMessage, setBugMessage] = useState('')
+  const [bugError, setBugError] = useState('')
+
   const [newLeagueName, setNewLeagueName] = useState('')
   const [joinCode, setJoinCode] = useState('')
   const [leagueAction, setLeagueAction] =
@@ -4614,6 +4621,95 @@ function SettingsPage({
         'Match this device',
     },
   ]
+
+  async function handleBugReport(
+    event: React.FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault()
+
+    const description =
+      bugDescription.trim()
+
+    if (!description) {
+      setBugError(
+        'Please describe the problem.',
+      )
+      return
+    }
+
+    setBugSubmitting(true)
+    setBugMessage('')
+    setBugError('')
+
+    try {
+      const reportRef =
+        doc(
+          collection(
+            db,
+            'bugReports',
+          ),
+        )
+
+      await setDoc(
+        reportRef,
+        {
+          reportId:
+            reportRef.id,
+
+          userId:
+            user.uid,
+
+          userEmail:
+            user.email ?? '',
+
+          leagueId:
+            activeLeague.id,
+
+          leagueName:
+            activeLeague.name,
+
+          description,
+
+          submittedFromTab:
+            'settings',
+
+          lastAppTab,
+
+          userAgent:
+            navigator.userAgent,
+
+          screenWidth:
+            window.innerWidth,
+
+          screenHeight:
+            window.innerHeight,
+
+          createdAt:
+            serverTimestamp(),
+
+          status:
+            'new',
+        },
+      )
+
+      setBugDescription('')
+
+      setBugMessage(
+        'Thanks — your bug report was submitted.',
+      )
+    } catch (error) {
+      console.error(error)
+
+      setBugError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to submit your bug report.',
+      )
+    } finally {
+      setBugSubmitting(false)
+    }
+  }
+
 
   return (
     <section className="page-placeholder">
@@ -5857,6 +5953,105 @@ function SettingsPage({
         )}
       </div>
 
+      <div className="settings-card">
+        <h2>Support</h2>
+
+        <form
+          onSubmit={handleBugReport}
+        >
+          <h3
+            style={{
+              marginBottom: 6,
+            }}
+          >
+            Report a Bug
+          </h3>
+
+          <p
+            style={{
+              margin:
+                '0 0 12px',
+              fontSize: 12,
+              color:
+                'var(--theme-muted, #64748b)',
+            }}
+          >
+            Tell us what went wrong and what you were doing when it happened.
+          </p>
+
+          <textarea
+            value={bugDescription}
+            onChange={(event) =>
+              setBugDescription(
+                event.target.value,
+              )
+            }
+            placeholder="Describe the problem…"
+            maxLength={2000}
+            rows={5}
+            disabled={bugSubmitting}
+            style={{
+              width: '100%',
+              boxSizing:
+                'border-box',
+              resize: 'vertical',
+              minHeight: 110,
+              padding: '11px 12px',
+              border:
+                '1px solid #cbd5e1',
+              borderRadius: 10,
+              background:
+                'var(--theme-card, #fff)',
+              color: 'inherit',
+              font: 'inherit',
+            }}
+          />
+
+          <button
+            type="submit"
+            disabled={
+              bugSubmitting ||
+              !bugDescription.trim()
+            }
+            style={{
+              width: '100%',
+              marginTop: 9,
+              padding: '11px 12px',
+              border: 0,
+              borderRadius: 10,
+              font: 'inherit',
+              fontWeight: 800,
+              cursor:
+                bugSubmitting
+                  ? 'wait'
+                  : 'pointer',
+            }}
+          >
+            {bugSubmitting
+              ? 'Submitting…'
+              : 'Submit Bug Report'}
+          </button>
+
+          {bugMessage && (
+            <p
+              style={{
+                margin: '9px 0 0',
+                fontSize: 12,
+                fontWeight: 800,
+              }}
+            >
+              {bugMessage}
+            </p>
+          )}
+
+          {bugError && (
+            <p className="login-error">
+              {bugError}
+            </p>
+          )}
+        </form>
+      </div>
+
       <div className="settings-card account-settings-card">
         <h2>Account</h2>
         <p>
@@ -6296,6 +6491,19 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true)
   const [dataLoading, setDataLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>('home')
+  const [lastNonSettingsTab, setLastNonSettingsTab] =
+    useState<Tab>('home')
+
+
+  useEffect(() => {
+    if (
+      activeTab !== 'settings'
+    ) {
+      setLastNonSettingsTab(
+        activeTab,
+      )
+    }
+  }, [activeTab])
   const [games, setGames] = useState<Game[]>([])
   const [picks, setPicks] = useState<Picks>({})
   const [leaguePlayers, setLeaguePlayers] = useState<LeaguePlayer[]>([])
@@ -9417,6 +9625,7 @@ function App() {
         onNotificationPreferenceChange={changeNotificationPreference}
         onEnableNotifications={enableNotifications}
         onDisableNotifications={disableNotifications}
+        lastAppTab={lastNonSettingsTab}
       />
     )
   } else if (
