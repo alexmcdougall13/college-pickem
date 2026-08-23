@@ -2427,7 +2427,44 @@ function AdminPage({
         })
 
       setAvailableGames(loadedGames)
-      setLastEspnLoadAt(new Date())
+
+      const latestEspnSyncTime =
+        masterSnapshot.docs.reduce<Date | null>(
+          (latest, gameDocument) => {
+            const value =
+              gameDocument.data().espnSyncedAt
+
+            const date =
+              value &&
+              typeof value.toDate === 'function'
+                ? value.toDate()
+                : value instanceof Date
+                  ? value
+                  : null
+
+            if (
+              !date ||
+              Number.isNaN(date.getTime())
+            ) {
+              return latest
+            }
+
+            if (
+              !latest ||
+              date.getTime() >
+                latest.getTime()
+            ) {
+              return date
+            }
+
+            return latest
+          },
+          null,
+        )
+
+      setLastEspnLoadAt(
+        latestEspnSyncTime,
+      )
     } catch (loadError) {
       console.error(loadError)
       setError('Unable to load available games.')
@@ -3381,11 +3418,14 @@ function AdminPage({
           {espnRefreshStatus
             ? espnRefreshStatus
             : lastEspnLoadAt
-              ? `Latest ESPN data loaded ${lastEspnLoadAt.toLocaleTimeString([], {
+              ? `Last synced with ESPN ${lastEspnLoadAt.toLocaleDateString([], {
+                  month: 'short',
+                  day: 'numeric',
+                })} at ${lastEspnLoadAt.toLocaleTimeString([], {
                   hour: 'numeric',
                   minute: '2-digit',
                 })}.`
-              : 'ESPN data has not been loaded yet.'}
+              : 'ESPN data has not been synced yet.'}
           {' '}The refresh now runs entirely inside the app and reloads
           the Admin list automatically when the sync finishes.
         </p>

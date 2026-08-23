@@ -1158,6 +1158,13 @@ async function syncEvents(
   const currentGameIds =
     new Set()
 
+  /*
+   * One shared timestamp for this successful ESPN data refresh.
+   * Every game written during this run receives the same value.
+   */
+  const espnSyncedAt =
+    new Date()
+
   for (const game of games) {
     currentGameIds.add(
       game.gameId,
@@ -1177,6 +1184,7 @@ async function syncEvents(
 
     const dataToSave = {
       ...game,
+      espnSyncedAt,
     }
 
     if (existing) {
