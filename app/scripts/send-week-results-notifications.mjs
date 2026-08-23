@@ -776,6 +776,12 @@ async function processWeek(
         bestScore,
     )
 
+  const tiedBeforeTiebreaker =
+    winners.length > 1
+
+  let decidedByTiebreaker =
+    false
+
   const tiebreakerGame =
     games.find(
       (game) =>
@@ -821,7 +827,7 @@ async function processWeek(
           ),
         )
 
-      winners =
+      const tiebreakerWinners =
         withTiebreakers.filter(
           (winner) =>
             Math.abs(
@@ -830,6 +836,14 @@ async function processWeek(
             ) ===
             bestDifference,
         )
+
+      decidedByTiebreaker =
+        tiedBeforeTiebreaker &&
+        tiebreakerWinners.length <
+          winners.length
+
+      winners =
+        tiebreakerWinners
     }
   }
 
@@ -854,7 +868,11 @@ async function processWeek(
     winners.length === 1
   ) {
     body =
-      `${winnerNames[0]} won ${weekLabel} going ${winningRecord.correct}-${winningRecord.losses}`
+      `${winnerNames[0]} won ${weekLabel} going ${winningRecord.correct}-${winningRecord.losses}${
+        decidedByTiebreaker
+          ? ' with the tiebreaker'
+          : ''
+      }`
   } else if (
     winners.length === 2
   ) {
