@@ -2695,13 +2695,155 @@ function AdminPage({
         }
 
         if (statusResult.status === 'success') {
+          setEspnRefreshStatus('Updating published game times…')
+
+          /*
+           * ESPN remains authoritative for kickoff changes while a
+           * published game is still active. Keep the league copy in
+           * sync so Admin, Picks, Home, History, and Firestore locking
+           * all use the same schedule.
+           *
+           * Final games are left untouched so completed history stays
+           * frozen.
+           */
+          const [
+            refreshedMasterSnapshot,
+            publishedGamesSnapshot,
+          ] = await Promise.all([
+            getDocs(
+              collection(
+                db,
+                'availableGames',
+              ),
+            ),
+            getDocs(
+              query(
+                collection(
+                  db,
+                  'leagues',
+                  leagueId,
+                  'games',
+                ),
+                where(
+                  'weekId',
+                  '==',
+                  publishWeekId,
+                ),
+              ),
+            ),
+          ])
+
+          const refreshedMasterByGameId =
+            new Map(
+              refreshedMasterSnapshot.docs.map(
+                (gameDocument) => {
+                  const data =
+                    gameDocument.data()
+
+                  return [
+                    String(
+                      data.gameId ??
+                        gameDocument.id,
+                    ),
+                    data,
+                  ] as const
+                },
+              ),
+            )
+
+          const scheduleBatch =
+            writeBatch(db)
+
+          let scheduleUpdates = 0
+
+          publishedGamesSnapshot.docs.forEach(
+            (gameDocument) => {
+              const published =
+                gameDocument.data()
+
+              if (published.final === true) {
+                return
+              }
+
+              const gameId = String(
+                published.gameId ??
+                  gameDocument.id,
+              )
+
+              const latest =
+                refreshedMasterByGameId.get(
+                  gameId,
+                )
+
+              const latestKickoff =
+                typeof latest?.kickoff ===
+                  'string'
+                  ? latest.kickoff
+                  : ''
+
+              if (!latestKickoff) {
+                return
+              }
+
+              const kickoffDate =
+                new Date(latestKickoff)
+
+              if (
+                Number.isNaN(
+                  kickoffDate.getTime(),
+                )
+              ) {
+                return
+              }
+
+              if (
+                published.kickoff ===
+                latestKickoff
+              ) {
+                return
+              }
+
+              scheduleBatch.update(
+                gameDocument.ref,
+                {
+                  kickoff:
+                    latestKickoff,
+                  kickoffTimestamp:
+                    Timestamp.fromDate(
+                      kickoffDate,
+                    ),
+                  scheduleUpdatedAt:
+                    serverTimestamp(),
+                },
+              )
+
+              scheduleUpdates += 1
+            },
+          )
+
+          if (scheduleUpdates > 0) {
+            await scheduleBatch.commit()
+          }
+
           setEspnRefreshStatus('Loading updated ESPN data…')
 
-          await loadAvailableGames({
-            showLoading: false,
-          })
+          await Promise.all([
+            loadAvailableGames({
+              showLoading: false,
+            }),
+            onPublished(),
+          ])
 
-          setEspnRefreshStatus('ESPN data updated.')
+          setEspnRefreshStatus(
+            scheduleUpdates > 0
+              ? `ESPN data updated. ${scheduleUpdates} published game${
+                  scheduleUpdates === 1
+                    ? ''
+                    : 's'
+                } rescheduled.`
+              : 'ESPN data updated.',
+          )
+
           return
         }
       }
@@ -2819,28 +2961,56 @@ function AdminPage({
         )
       })
 
+      const existingGameIds = new Set(
+        existingGamesSnapshot.docs.map((gameDocument) =>
+          String(gameDocument.data().gameId ?? gameDocument.id),
+        ),
+      )
+
+      const currentAvailableByGameId = new Map(
+        availableGames.map((game) => [
+          game.gameId,
+          game,
+        ]),
+      )
+
       const lockedExistingGames = existingGamesSnapshot.docs.filter(
         (gameDocument) => {
           const data = gameDocument.data()
-          const kickoff =
-            typeof data.kickoff === 'string'
-              ? data.kickoff
-              : ''
+          const gameId = String(
+            data.gameId ?? gameDocument.id,
+          )
 
-          return kickoff ? isGameLocked(kickoff) : false
+          const currentAvailableGame =
+            currentAvailableByGameId.get(gameId)
+
+          const kickoff =
+            currentAvailableGame?.kickoff ||
+            (
+              typeof data.kickoff === 'string'
+                ? data.kickoff
+                : ''
+            )
+
+          return kickoff
+            ? isGameLocked(kickoff)
+            : false
         },
       )
 
       const lockedExistingIds = new Set(
         lockedExistingGames.map((gameDocument) =>
-          String(gameDocument.data().gameId ?? gameDocument.id),
+          String(
+            gameDocument.data().gameId ??
+              gameDocument.id,
+          ),
         ),
       )
 
       const newlySelectedLockedGame = selectedGames.find(
         (game) =>
           isGameLocked(game.kickoff) &&
-          !lockedExistingIds.has(game.gameId),
+          !existingGameIds.has(game.gameId),
       )
 
       if (newlySelectedLockedGame) {
@@ -3135,6 +3305,14 @@ function AdminPage({
   }
 
   const selectedCount = availableGames.filter((game) => game.selected).length
+
+  const lockedTiebreakerGame =
+    availableGames.find(
+      (game) =>
+        game.selected &&
+        game.tiebreaker &&
+        isGameLocked(game.kickoff),
+    ) ?? null
 
   return (
     <section className="admin-page">
@@ -3597,13 +3775,21 @@ function AdminPage({
                   alignItems: 'center',
                   justifyContent: 'center',
                   minHeight: 44,
-                  cursor: savingId !== null ? 'default' : 'pointer',
+                  opacity: isGameLocked(game.kickoff) ? 0.55 : 1,
+                  cursor:
+                    savingId !== null ||
+                    isGameLocked(game.kickoff)
+                      ? 'default'
+                      : 'pointer',
                 }}
               >
                 <input
                   type="checkbox"
                   checked={game.selected}
-                  disabled={savingId !== null}
+                  disabled={
+                    savingId !== null ||
+                    isGameLocked(game.kickoff)
+                  }
                   onChange={() => toggleSelection(game)}
                   aria-label={`Select ${game.awayTeamName} at ${game.homeTeamName}`}
                   style={{
@@ -3620,9 +3806,20 @@ function AdminPage({
                   alignItems: 'center',
                   justifyContent: 'center',
                   minHeight: 44,
-                  opacity: game.selected ? 1 : 0.45,
+                  opacity:
+                    game.selected &&
+                    !isGameLocked(game.kickoff) &&
+                    (
+                      !lockedTiebreakerGame ||
+                      lockedTiebreakerGame.gameId === game.gameId
+                    )
+                      ? 1
+                      : 0.45,
                   cursor:
-                    game.selected && savingId === null
+                    game.selected &&
+                    savingId === null &&
+                    !isGameLocked(game.kickoff) &&
+                    !lockedTiebreakerGame
                       ? 'pointer'
                       : 'default',
                 }}
@@ -3630,7 +3827,15 @@ function AdminPage({
                 <input
                   type="checkbox"
                   checked={game.tiebreaker}
-                  disabled={!game.selected || savingId !== null}
+                  disabled={
+                    !game.selected ||
+                    savingId !== null ||
+                    isGameLocked(game.kickoff) ||
+                    (
+                      lockedTiebreakerGame !== null &&
+                      lockedTiebreakerGame.gameId !== game.gameId
+                    )
+                  }
                   onChange={() => toggleTiebreaker(game)}
                   aria-label={`Use ${game.awayTeamName} at ${game.homeTeamName} as tiebreaker`}
                   style={{
