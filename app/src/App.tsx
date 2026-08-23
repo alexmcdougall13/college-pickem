@@ -2860,7 +2860,9 @@ function AdminPage({
     }
   }
 
-  async function refreshEspnData() {
+  async function refreshEspnData(
+    weekNumberOverride?: number,
+  ) {
     if (refreshingEspn) return
 
     const user = auth.currentUser
@@ -2886,7 +2888,10 @@ function AdminPage({
       const value =
         mode === 'postseason'
           ? ''
-          : String(currentWeek.weekNumber)
+          : String(
+              weekNumberOverride ??
+                currentWeek.weekNumber,
+            )
 
       const response = await fetch(
         `${ESPN_SYNC_WORKER_URL}/refresh`,
@@ -3154,9 +3159,18 @@ function AdminPage({
     setPublishMessage('')
 
     try {
+      const nextWeekNumber =
+        currentWeek.weekNumber + 1
+
       await onStartNextWeek()
-      setPublishMessage(`Week ${currentWeek.weekNumber + 1} is ready.`)
-      await loadAvailableGames()
+
+      setPublishMessage(
+        `Week ${nextWeekNumber} is ready.`,
+      )
+
+      await loadAvailableGames({
+        showLoading: false,
+      })
     } catch (startError) {
       console.error(startError)
       setError(`Unable to start Week ${currentWeek.weekNumber + 1}.`)
@@ -3621,7 +3635,7 @@ function AdminPage({
 
         <button
           type="button"
-          onClick={refreshEspnData}
+          onClick={() => refreshEspnData()}
           disabled={
             refreshingEspn ||
             publishing ||
