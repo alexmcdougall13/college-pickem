@@ -268,62 +268,46 @@ function describeLeague(
 function buildBody(
   reminders,
 ) {
-  /*
-   * If everything missing belongs
-   * to one league, keep the message
-   * short and natural.
-   */
   if (reminders.length === 1) {
     const reminder =
       reminders[0]
 
-    const parts = []
+    const dueCount =
+      reminder.missingGames.length
 
-    if (
-      reminder.missingGames.length >
-      0
-    ) {
-      parts.push(
-        reminder.missingGames.length ===
-          1
-          ? '1 pick'
-          : `${reminder.missingGames.length} picks`,
-      )
+    const totalRemaining =
+      reminder.totalRemainingGames
+
+    let body = ''
+
+    if (dueCount > 0) {
+      body = `${dueCount} of your ${totalRemaining} remaining ${reminder.weekLabel} ${
+        totalRemaining === 1
+          ? 'pick'
+          : 'picks'
+      } ${
+        dueCount === 1
+          ? 'is'
+          : 'are'
+      } due soon`
     }
 
-    if (
-      reminder.missingTiebreaker
-    ) {
-      parts.push(
-        'your tiebreaker',
-      )
+    if (reminder.missingTiebreaker) {
+      body += `${
+        body
+          ? ' and your tiebreaker'
+          : `Your ${reminder.weekLabel} tiebreaker`
+      } ${
+        body
+          ? 'is'
+          : 'is'
+      } due soon`
     }
 
-    const due =
-      parts.length === 1
-        ? parts[0]
-        : `${parts
-            .slice(0, -1)
-            .join(', ')} and ${
-            parts[
-              parts.length - 1
-            ]
-          }`
-
-    return `${due} ${
-      parts.length === 1
-        ? 'is'
-        : 'are'
-    } still missing for ${reminder.weekLabel}.`
+    return `${body}.`
   }
 
-  /*
-   * Multiple leagues are combined
-   * into one notification.
-   */
-  return `You still have picks due: ${reminders
-    .map(describeLeague)
-    .join('; ')}.`
+  return `You still have picks due soon in ${reminders.length} leagues.`
 }
 
 async function collectLeague(
@@ -402,7 +386,7 @@ async function collectLeague(
         60 *
         1000
 
-    const dueGames =
+    const futureGames =
       gamesSnapshot.docs
         .map((doc) => {
           const data =
@@ -431,10 +415,15 @@ async function collectLeague(
             Number.isFinite(
               game.kickoffMs,
             ) &&
-            game.kickoffMs > now &&
-            game.kickoffMs <=
-              cutoff,
+            game.kickoffMs > now,
         )
+
+    const dueGames =
+      futureGames.filter(
+        (game) =>
+          game.kickoffMs <=
+            cutoff,
+      )
 
     if (
       dueGames.length === 0
@@ -496,6 +485,14 @@ async function collectLeague(
             .filter(Boolean)
             .map(String),
         )
+
+      const totalRemainingGames =
+        futureGames.filter(
+          (game) =>
+            !pickedGameIds.has(
+              game.gameId,
+            ),
+        ).length
 
       const missingGames = []
 
@@ -585,6 +582,7 @@ async function collectLeague(
         weekLabel,
         missingGames,
         missingTiebreaker,
+        totalRemainingGames,
       }
 
       const existing =
@@ -750,7 +748,7 @@ async function sendUserReminder(
 
         notification: {
           title:
-            'College Pick’em — Pick Reminder',
+            'College Pick’em — Picks Due Soon',
 
           body,
         },
