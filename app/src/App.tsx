@@ -4484,57 +4484,31 @@ function SettingsPage({
       return
     }
 
+    const siteUrl =
+      'https://college-pickem-a1056.web.app'
+
     const text =
-      `Join my ${activeLeague.name} College Pick’em league with code ${activeLeague.joinCode}.`
+      `Join my ${activeLeague.name} College Pick’em league with code ${activeLeague.joinCode}.\n\nOpen College Pick’em: ${siteUrl}`
 
     setInviteMessage('')
 
     try {
-      if (navigator.share) {
-        await navigator.share({
-          title:
-            `${activeLeague.name} — College Pick’em`,
-          text,
-        })
-
-        setInviteMessage('Invite shared.')
-        return
-      }
-
       await navigator.clipboard.writeText(
-        activeLeague.joinCode,
+        text,
       )
 
       setInviteMessage(
-        'Join code copied.',
+        'Invite copied.',
       )
     } catch (error) {
-      /*
-       * Share-sheet cancellation is not an app error.
-       */
-      if (
-        error instanceof DOMException &&
-        error.name === 'AbortError'
-      ) {
-        return
-      }
-
       console.error(error)
 
-      try {
-        await navigator.clipboard.writeText(
-          activeLeague.joinCode,
-        )
-        setInviteMessage(
-          'Join code copied.',
-        )
-      } catch {
-        setInviteMessage(
-          `Join code: ${activeLeague.joinCode}`,
-        )
-      }
+      setInviteMessage(
+        `Join code: ${activeLeague.joinCode} · ${siteUrl}`,
+      )
     }
   }
+
 
   const activeAdmins =
     leaguePlayers.filter(
