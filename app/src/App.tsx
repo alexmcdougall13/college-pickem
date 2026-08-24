@@ -4180,6 +4180,7 @@ function SettingsPage({
   onRemoveMember,
   onReinstateMember,
   onSaveDisplayName,
+  onRenameLeague,
   notificationSupported,
   notificationPermission,
   notificationsEnabled,
@@ -4211,6 +4212,7 @@ function SettingsPage({
   onRemoveMember: (userId: string) => Promise<void>
   onReinstateMember: (userId: string) => Promise<void>
   onSaveDisplayName: (displayName: string) => Promise<void>
+  onRenameLeague: (leagueName: string) => Promise<void>
   notificationSupported: boolean
   notificationPermission: NotificationPermission
   notificationsEnabled: boolean
@@ -4234,6 +4236,15 @@ function SettingsPage({
     useState<string | null>(null)
   const [bugMessage, setBugMessage] = useState('')
   const [bugError, setBugError] = useState('')
+
+  const [leagueName, setLeagueName] =
+    useState(activeLeague.name)
+  const [leagueNameBusy, setLeagueNameBusy] =
+    useState(false)
+  const [leagueNameMessage, setLeagueNameMessage] =
+    useState('')
+  const [leagueNameError, setLeagueNameError] =
+    useState('')
 
   const [newLeagueName, setNewLeagueName] = useState('')
   const [joinCode, setJoinCode] = useState('')
@@ -4266,13 +4277,71 @@ function SettingsPage({
     )
     setDisplayNameMessage('')
     setDisplayNameError('')
+
+    setLeagueName(
+      activeLeague.name,
+    )
+    setLeagueNameMessage('')
+    setLeagueNameError('')
   }, [
     activeLeague.id,
+    activeLeague.name,
     currentLeaguePlayer?.name,
   ])
 
   async function handleSignOut() {
     await signOut(auth)
+  }
+
+  async function handleLeagueNameSave(
+    event: React.FormEvent,
+  ) {
+    event.preventDefault()
+
+    const cleanName =
+      leagueName.trim()
+
+    if (!cleanName) {
+      setLeagueNameError(
+        'Enter a league name.',
+      )
+      return
+    }
+
+    if (cleanName.length > 50) {
+      setLeagueNameError(
+        'League name must be 50 characters or fewer.',
+      )
+      return
+    }
+
+    setLeagueNameBusy(true)
+    setLeagueNameError('')
+    setLeagueNameMessage('')
+
+    try {
+      await onRenameLeague(
+        cleanName,
+      )
+
+      setLeagueName(
+        cleanName,
+      )
+
+      setLeagueNameMessage(
+        'League name updated.',
+      )
+    } catch (error) {
+      console.error(error)
+
+      setLeagueNameError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to update the league name.',
+      )
+    } finally {
+      setLeagueNameBusy(false)
+    }
   }
 
   async function handleDisplayNameSave(
@@ -5214,6 +5283,118 @@ function SettingsPage({
 
       <div className="settings-card account-settings-card">
         <h2>Leagues</h2>
+
+        {isAdmin && (
+          <form
+            onSubmit={handleLeagueNameSave}
+            style={{
+              marginTop: 12,
+              marginBottom: 18,
+              paddingBottom: 18,
+              borderBottom:
+                '1px solid #edf0f5',
+            }}
+          >
+            <label
+              style={{
+                display: 'block',
+                fontWeight: 800,
+              }}
+            >
+              <span
+                style={{
+                  display: 'block',
+                  marginBottom: 6,
+                  fontSize: 12,
+                }}
+              >
+                League name
+              </span>
+
+              <input
+                type="text"
+                value={leagueName}
+                onChange={(event) =>
+                  setLeagueName(
+                    event.target.value,
+                  )
+                }
+                maxLength={50}
+                disabled={leagueNameBusy}
+                placeholder="League name"
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  padding: '11px 12px',
+                  border:
+                    '1px solid var(--theme-border, #cbd5e1)',
+                  borderRadius: 10,
+                  background:
+                    'var(--theme-soft, #fff)',
+                  color:
+                    'var(--theme-text, inherit)',
+                  font: 'inherit',
+                }}
+              />
+            </label>
+
+            <p
+              style={{
+                margin: '6px 0 0',
+                color:
+                  'var(--theme-muted, #64748b)',
+                fontSize: 12,
+              }}
+            >
+              Changing the name does not affect the join code, members, picks, or league history.
+            </p>
+
+            <button
+              type="submit"
+              disabled={
+                leagueNameBusy ||
+                !leagueName.trim() ||
+                leagueName.trim() ===
+                  activeLeague.name
+              }
+              style={{
+                width: '100%',
+                marginTop: 9,
+                padding: '10px 12px',
+                border: 0,
+                borderRadius: 10,
+                font: 'inherit',
+                fontWeight: 800,
+                cursor:
+                  leagueNameBusy
+                    ? 'wait'
+                    : 'pointer',
+              }}
+            >
+              {leagueNameBusy
+                ? 'Saving…'
+                : 'Save League Name'}
+            </button>
+
+            {leagueNameMessage && (
+              <p
+                style={{
+                  margin: '8px 0 0',
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}
+              >
+                {leagueNameMessage}
+              </p>
+            )}
+
+            {leagueNameError && (
+              <p className="login-error">
+                {leagueNameError}
+              </p>
+            )}
+          </form>
+        )}
 
         <form
           onSubmit={handleDisplayNameSave}
@@ -6518,13 +6699,21 @@ function SettingsPage({
 }
 
 function LeagueSetupPage({
+  user,
   onRequestLeague,
   onJoinLeague,
   leagueRequest,
+  platformLeagueRequests,
+  onApproveLeagueRequest,
+  onRejectLeagueRequest,
 }: {
+  user: User
   onRequestLeague: (leagueName: string) => Promise<void>
   onJoinLeague: (joinCode: string) => Promise<League>
   leagueRequest: LeagueRequest | null
+  platformLeagueRequests: LeagueRequest[]
+  onApproveLeagueRequest: (request: LeagueRequest) => Promise<void>
+  onRejectLeagueRequest: (request: LeagueRequest) => Promise<void>
 }) {
   const [leagueName, setLeagueName] = useState('')
   const [joinCode, setJoinCode] = useState('')
@@ -6551,6 +6740,36 @@ function LeagueSetupPage({
         createError instanceof Error
           ? createError.message
           : 'Unable to create the league.',
+      )
+    } finally {
+      setAction(null)
+    }
+  }
+
+  async function handleSetupRequest(
+    request: LeagueRequest,
+    decision: 'approve' | 'reject',
+  ) {
+    setError('')
+    setAction('create')
+
+    try {
+      if (decision === 'approve') {
+        await onApproveLeagueRequest(
+          request,
+        )
+      } else {
+        await onRejectLeagueRequest(
+          request,
+        )
+      }
+    } catch (requestError) {
+      console.error(requestError)
+
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : `Unable to ${decision} that request.`,
       )
     } finally {
       setAction(null)
@@ -6623,6 +6842,110 @@ function LeagueSetupPage({
             Your last league request was not approved. You may submit a new request.
           </p>
         )}
+
+        {user.uid === PLATFORM_OWNER_UID &&
+          platformLeagueRequests.length > 0 && (
+            <div
+              style={{
+                marginBottom: 20,
+                padding: 14,
+                border: '1px solid #d9e0ea',
+                borderRadius: 10,
+              }}
+            >
+              <h3
+                style={{
+                  margin: '0 0 10px',
+                }}
+              >
+                League Requests
+              </h3>
+
+              {platformLeagueRequests.map(
+                (request, index) => (
+                  <div
+                    key={request.userId}
+                    style={{
+                      padding:
+                        index === 0
+                          ? '0 0 12px'
+                          : '12px 0',
+                      borderBottom:
+                        index ===
+                        platformLeagueRequests.length - 1
+                          ? 'none'
+                          : '1px solid #edf0f5',
+                    }}
+                  >
+                    <strong>
+                      {request.leagueName}
+                    </strong>
+
+                    <p
+                      style={{
+                        margin: '4px 0 0',
+                        fontSize: 12,
+                        color: '#64748b',
+                      }}
+                    >
+                      Requested by {request.userName}
+                    </p>
+
+                    <div
+                      style={{
+                        display: 'flex',
+                        gap: 8,
+                        marginTop: 9,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        disabled={action !== null}
+                        onClick={() =>
+                          handleSetupRequest(
+                            request,
+                            'approve',
+                          )
+                        }
+                        style={{
+                          flex: 1,
+                        }}
+                      >
+                        {action === 'create'
+                          ? 'Working…'
+                          : 'Approve'}
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={action !== null}
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `Reject ${request.leagueName}?`,
+                            )
+                          ) {
+                            handleSetupRequest(
+                              request,
+                              'reject',
+                            )
+                          }
+                        }}
+                        style={{
+                          flex: 1,
+                          background: 'transparent',
+                          color: 'inherit',
+                          border: '1px solid #cbd5e1',
+                        }}
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                ),
+              )}
+            </div>
+          )}
 
         <form
           className="login-form"
@@ -9121,6 +9444,78 @@ function App() {
     return league
   }
 
+  async function renameLeague(
+    leagueName: string,
+  ) {
+    if (
+      !user ||
+      !activeLeague ||
+      !isAdmin
+    ) {
+      throw new Error(
+        'League admin access is required.',
+      )
+    }
+
+    const cleanName =
+      leagueName.trim()
+
+    if (!cleanName) {
+      throw new Error(
+        'Enter a league name.',
+      )
+    }
+
+    if (cleanName.length > 50) {
+      throw new Error(
+        'League name must be 50 characters or fewer.',
+      )
+    }
+
+    await setDoc(
+      doc(
+        db,
+        'leagues',
+        activeLeague.id,
+      ),
+      {
+        name:
+          cleanName,
+        updatedAt:
+          serverTimestamp(),
+      },
+      {
+        merge: true,
+      },
+    )
+
+    setActiveLeague(
+      (current) =>
+        current
+          ? {
+              ...current,
+              name:
+                cleanName,
+            }
+          : current,
+    )
+
+    setAvailableLeagues(
+      (current) =>
+        current.map(
+          (league) =>
+            league.id ===
+            activeLeague.id
+              ? {
+                  ...league,
+                  name:
+                    cleanName,
+                }
+              : league,
+        ),
+    )
+  }
+
   async function saveLeagueDisplayName(
     displayName: string,
   ) {
@@ -9944,9 +10339,13 @@ function App() {
   if (!activeLeague) {
     return (
       <LeagueSetupPage
+        user={user}
         onRequestLeague={requestLeague}
         onJoinLeague={joinLeague}
         leagueRequest={leagueRequest}
+        platformLeagueRequests={platformLeagueRequests}
+        onApproveLeagueRequest={approveLeagueRequest}
+        onRejectLeagueRequest={rejectLeagueRequest}
       />
     )
   }
@@ -10054,6 +10453,7 @@ function App() {
         onRemoveMember={removeLeagueMember}
         onReinstateMember={reinstateLeagueMember}
         onSaveDisplayName={saveLeagueDisplayName}
+        onRenameLeague={renameLeague}
         notificationSupported={notificationSupported}
         notificationPermission={notificationPermission}
         notificationsEnabled={notificationsEnabled}
@@ -10155,11 +10555,11 @@ function App() {
               padding:
                 '10px 12px',
               border:
-                '1px solid #cbd5e1',
+                '1px solid var(--theme-border, #cbd5e1)',
               borderRadius: 10,
               background:
-                'var(--theme-card, #fff)',
-              color: 'inherit',
+                'var(--theme-surface, #fff)',
+              color: 'var(--theme-text, inherit)',
               font: 'inherit',
               fontWeight: 800,
             }}
@@ -10181,10 +10581,12 @@ function App() {
               padding:
                 '10px 12px',
               border:
-                '1px solid #d9e0ea',
+                '1px solid var(--theme-border, #d9e0ea)',
               borderRadius: 10,
               background:
-                'var(--theme-card, #fff)',
+                'var(--theme-surface, #fff)',
+              color:
+                'var(--theme-text, inherit)',
               fontWeight: 800,
             }}
           >
