@@ -549,7 +549,9 @@ function HomePage({
               ? 'No games published yet'
               : picksMade === totalGames
                 ? 'All picks completed'
-                : `${totalGames - picksMade} picks remaining`}
+                : `${totalGames - picksMade} ${
+                    totalGames - picksMade === 1 ? 'pick' : 'picks'
+                  } remaining`}
           </strong>
         </div>
       </section>
@@ -7262,6 +7264,7 @@ function App() {
   const [currentWeek, setCurrentWeek] = useState<Week>(DEFAULT_WEEK)
   const [seasonWeeks, setSeasonWeeks] = useState<SeasonWeekData[]>([])
   const [gamesRefreshKey, setGamesRefreshKey] = useState(0)
+  const [leagueBadgeCounts, setLeagueBadgeCounts] = useState<Record<string, number>>({})
   const [notificationSupported, setNotificationSupported] = useState(true)
   const [notificationPermission, setNotificationPermission] =
     useState<NotificationPermission>(() =>
@@ -7312,6 +7315,260 @@ function App() {
   ) {
     return `college-pickem-notifications-enabled-${uid}`
   }
+
+  useEffect(() => {
+    if (!user) {
+      setLeagueBadgeCounts({})
+      return
+    }
+
+    if (availableLeagues.length === 0) {
+      setLeagueBadgeCounts({})
+      return
+    }
+
+    const currentUser = user
+    let cancelled = false
+
+    async function loadLeagueBadgeCounts() {
+      try {
+        const results = await Promise.all(
+          availableLeagues.map(async (league) => {
+            const weeksSnapshot = await getDocs(
+              collection(
+                db,
+                'leagues',
+                league.id,
+                'weeks',
+              ),
+            )
+
+            const weeks = weeksSnapshot.docs
+              .map((weekDocument) => {
+                const data = weekDocument.data()
+
+                return {
+                  weekId: String(
+                    data.weekId ?? weekDocument.id,
+                  ),
+                  weekNumber:
+                    typeof data.weekNumber === 'number'
+                      ? data.weekNumber
+                      : 0,
+                }
+              })
+              .filter((week) => week.weekNumber > 0)
+              .sort(
+                (a, b) =>
+                  b.weekNumber - a.weekNumber,
+              )
+
+            const activeWeek = weeks[0]
+
+            if (!activeWeek) {
+              return [league.id, 0] as const
+            }
+
+            const gamesSnapshot = await getDocs(
+              query(
+                collection(
+                  db,
+                  'leagues',
+                  league.id,
+                  'games',
+                ),
+                where(
+                  'weekId',
+                  '==',
+                  activeWeek.weekId,
+                ),
+                where(
+                  'selected',
+                  '==',
+                  true,
+                ),
+              ),
+            )
+
+            const leagueGames =
+              gamesSnapshot.docs.map(
+                (gameDocument) => {
+                  const data =
+                    gameDocument.data()
+
+                  return {
+                    gameId: String(
+                      data.gameId ??
+                        gameDocument.id,
+                    ),
+                    tiebreaker:
+                      data.tiebreaker === true,
+                  }
+                },
+              )
+
+            if (leagueGames.length === 0) {
+              return [league.id, 0] as const
+            }
+
+            const picksSnapshot = await getDocs(
+              query(
+                collection(
+                  db,
+                  'leagues',
+                  league.id,
+                  'picks',
+                ),
+                where(
+                  'userId',
+                  '==',
+                  currentUser.uid,
+                ),
+                where(
+                  'weekId',
+                  '==',
+                  activeWeek.weekId,
+                ),
+              ),
+            )
+
+            const currentGameIds = new Set(
+              leagueGames.map(
+                (game) => game.gameId,
+              ),
+            )
+
+            const completedGameIds =
+              new Set<string>()
+
+            picksSnapshot.forEach(
+              (pickDocument) => {
+                const data =
+                  pickDocument.data()
+
+                if (
+                  typeof data.gameId ===
+                    'string' &&
+                  currentGameIds.has(
+                    data.gameId,
+                  )
+                ) {
+                  completedGameIds.add(
+                    data.gameId,
+                  )
+                }
+              },
+            )
+
+            let remaining = Math.max(
+              leagueGames.length -
+                completedGameIds.size,
+              0,
+            )
+
+            const tiebreakerGame =
+              leagueGames.find(
+                (game) => game.tiebreaker,
+              )
+
+            if (tiebreakerGame) {
+              const tiebreakerSnapshot =
+                await getDocs(
+                  query(
+                    collection(
+                      db,
+                      'leagues',
+                      league.id,
+                      'tiebreakers',
+                    ),
+                    where(
+                      'userId',
+                      '==',
+                      currentUser.uid,
+                    ),
+                    where(
+                      'weekId',
+                      '==',
+                      activeWeek.weekId,
+                    ),
+                  ),
+                )
+
+              const hasTiebreaker =
+                tiebreakerSnapshot.docs.some(
+                  (document) =>
+                    typeof document.data()
+                      .totalPoints === 'number',
+                )
+
+              if (!hasTiebreaker) {
+                remaining += 1
+              }
+            }
+
+            return [
+              league.id,
+              remaining,
+            ] as const
+          }),
+        )
+
+        if (cancelled) return
+
+        setLeagueBadgeCounts(
+          Object.fromEntries(results),
+        )
+      } catch (error) {
+        console.error(
+          'Unable to calculate pick badges.',
+          error,
+        )
+      }
+    }
+
+    loadLeagueBadgeCounts()
+
+    return () => {
+      cancelled = true
+    }
+  }, [user, availableLeagues])
+
+  function updateAppBadge(
+    counts: Record<string, number>,
+  ) {
+    const totalRemaining =
+      Object.values(counts).reduce(
+        (total, remaining) =>
+          total + remaining,
+        0,
+      )
+
+    const badgeNavigator =
+      navigator as Navigator & {
+        setAppBadge?: (
+          contents?: number,
+        ) => Promise<void>
+        clearAppBadge?: () => Promise<void>
+      }
+
+    const badgePromise =
+      totalRemaining > 0
+        ? badgeNavigator.setAppBadge?.(
+            totalRemaining,
+          )
+        : badgeNavigator.clearAppBadge?.()
+
+    badgePromise?.catch((error) => {
+      console.error(
+        'Unable to update app badge.',
+        error,
+      )
+    })
+  }
+
+  useEffect(() => {
+    updateAppBadge(leagueBadgeCounts)
+  }, [leagueBadgeCounts])
 
   async function saveNotificationRegistration(
     uid: string,
@@ -10295,6 +10552,38 @@ function App() {
         teamId,
         updatedAt: serverTimestamp(),
       })
+
+      const nextGamePicksMade =
+        Object.keys(picks).length +
+        (previousTeamId ? 0 : 1)
+
+      const hasTiebreakerForBadge =
+        games.some((candidate) => candidate.tiebreaker)
+
+      const nextRemainingForBadge = Math.max(
+        games.length +
+          (hasTiebreakerForBadge ? 1 : 0) -
+          nextGamePicksMade -
+          (
+            hasTiebreakerForBadge &&
+            tiebreaker.trim() !== ''
+              ? 1
+              : 0
+          ),
+        0,
+      )
+
+      setLeagueBadgeCounts((current) => {
+        const next = {
+          ...current,
+          [activeLeague!.id]:
+            nextRemainingForBadge,
+        }
+
+        updateAppBadge(next)
+
+        return next
+      })
     } catch (error) {
       console.error(error)
 
@@ -10381,6 +10670,26 @@ function App() {
           updatedAt: serverTimestamp(),
         },
       )
+
+      const nextRemainingForBadge = Math.max(
+        games.length +
+          1 -
+          Object.keys(picks).length -
+          1,
+        0,
+      )
+
+      setLeagueBadgeCounts((current) => {
+        const next = {
+          ...current,
+          [activeLeague.id]:
+            nextRemainingForBadge,
+        }
+
+        updateAppBadge(next)
+
+        return next
+      })
     } catch (error) {
       console.error(error)
       setSaveError(
@@ -10428,6 +10737,25 @@ function App() {
   const tiebreakerGame =
     games.find((game) => game.tiebreaker) ?? null
 
+  const gamePicksMade = Object.keys(picks).length
+
+  const hasTiebreaker = tiebreakerGame !== null
+
+  const tiebreakerCompleted =
+    hasTiebreaker && tiebreaker.trim() !== ''
+
+  const totalRequiredPicks =
+    games.length + (hasTiebreaker ? 1 : 0)
+
+  const completedPicks =
+    gamePicksMade + (tiebreakerCompleted ? 1 : 0)
+
+  const picksRemaining = Math.max(
+    totalRequiredPicks - completedPicks,
+    0,
+  )
+
+
   const tabs = isAdmin
     ? [
         ...regularTabs,
@@ -10456,8 +10784,8 @@ function App() {
         currentUserId={user.uid}
         players={currentWeekPlayers}
         games={games}
-        picksMade={Object.keys(picks).length}
-        totalGames={games.length}
+        picksMade={completedPicks}
+        totalGames={totalRequiredPicks}
         homePicks={homePicks}
         homeTiebreakers={homeTiebreakers}
         weekLabel={currentWeek.label}
@@ -10697,6 +11025,12 @@ function App() {
               aria-hidden="true"
             >
               {tab.icon}
+
+              {tab.id === 'picks' && picksRemaining > 0 && (
+                <span className="nav-badge">
+                  {picksRemaining > 99 ? '99+' : picksRemaining}
+                </span>
+              )}
             </span>
             <span>{tab.label}</span>
           </button>
