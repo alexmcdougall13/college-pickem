@@ -13,6 +13,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  onSnapshot,
   query,
   serverTimestamp,
   setDoc,
@@ -681,22 +682,30 @@ function HomePage({
                         >
                           <div
                             style={{
-                              position: 'relative',
                               width: '100%',
+                              display: 'grid',
+                              gridTemplateColumns: 'minmax(0, 1fr) 30px',
+                              columnGap: 8,
+                              alignItems: 'center',
                               minHeight: 14,
-                              padding: '0 22px',
                               boxSizing: 'border-box',
                             }}
                           >
                             <div
                               style={{
-                                position: 'absolute',
-                                left: '50%',
-                                top: 0,
-                                transform: 'translateX(-50%)',
+                                minWidth: 0,
                                 whiteSpace: 'nowrap',
-                                textAlign: 'center',
-                                fontSize: `${sharedTeamFontSize}px`,
+                                textAlign: 'left',
+                                fontSize: `${Math.min(
+                                  sharedTeamFontSize,
+                                  game.awayTeam.name.length > 18
+                                    ? 9
+                                    : game.awayTeam.name.length > 14
+                                      ? 10
+                                      : game.awayTeam.name.length > 11
+                                        ? 11
+                                        : sharedTeamFontSize,
+                                )}px`,
                                 letterSpacing: '-0.01em',
                               }}
                             >
@@ -705,42 +714,47 @@ function HomePage({
                                 : game.awayTeam.name}
                             </div>
 
-                            {(game.statusState === 'in' || game.final) &&
-                              game.awayScore != null && (
-                                <span
-                                  style={{
-                                    position: 'absolute',
-                                    right: 0,
-                                    top: 0,
-                                    minWidth: 18,
-                                    textAlign: 'right',
-                                    fontVariantNumeric: 'tabular-nums',
-                                  }}
-                                >
-                                  {game.awayScore}
-                                </span>
-                              )}
+                            <span
+                              style={{
+                                width: 30,
+                                textAlign: 'right',
+                                fontVariantNumeric: 'tabular-nums',
+                              }}
+                            >
+                              {(game.statusState === 'in' || game.final) &&
+                              game.awayScore != null
+                                ? game.awayScore
+                                : ''}
+                            </span>
                           </div>
 
                           <div
                             style={{
-                              position: 'relative',
                               width: '100%',
+                              display: 'grid',
+                              gridTemplateColumns: 'minmax(0, 1fr) 30px',
+                              columnGap: 8,
+                              alignItems: 'center',
                               minHeight: 14,
-                              padding: '0 22px',
                               boxSizing: 'border-box',
                               marginTop: 2,
                             }}
                           >
                             <div
                               style={{
-                                position: 'absolute',
-                                left: '50%',
-                                top: 0,
-                                transform: 'translateX(-50%)',
+                                minWidth: 0,
                                 whiteSpace: 'nowrap',
-                                textAlign: 'center',
-                                fontSize: `${sharedTeamFontSize}px`,
+                                textAlign: 'left',
+                                fontSize: `${Math.min(
+                                  sharedTeamFontSize,
+                                  game.homeTeam.name.length > 18
+                                    ? 9
+                                    : game.homeTeam.name.length > 14
+                                      ? 10
+                                      : game.homeTeam.name.length > 11
+                                        ? 11
+                                        : sharedTeamFontSize,
+                                )}px`,
                                 letterSpacing: '-0.01em',
                               }}
                             >
@@ -750,21 +764,18 @@ function HomePage({
                                 : game.homeTeam.name}
                             </div>
 
-                            {(game.statusState === 'in' || game.final) &&
-                              game.homeScore != null && (
-                                <span
-                                  style={{
-                                    position: 'absolute',
-                                    right: 0,
-                                    top: 0,
-                                    minWidth: 18,
-                                    textAlign: 'right',
-                                    fontVariantNumeric: 'tabular-nums',
-                                  }}
-                                >
-                                  {game.homeScore}
-                                </span>
-                              )}
+                            <span
+                              style={{
+                                width: 30,
+                                textAlign: 'right',
+                                fontVariantNumeric: 'tabular-nums',
+                              }}
+                            >
+                              {(game.statusState === 'in' || game.final) &&
+                              game.homeScore != null
+                                ? game.homeScore
+                                : ''}
+                            </span>
                           </div>
                         </div>
 
@@ -784,7 +795,7 @@ function HomePage({
                             wordBreak: 'normal',
                             padding: '0 4px',
                             boxSizing: 'border-box',
-                            textAlign: 'center',
+                            textAlign: 'left',
                           }}
                         >
                           {getHomeGameStatus(game)}
@@ -8727,6 +8738,99 @@ function App() {
       cancelled = true
     }
   }, [user, activeLeague?.id, gamesRefreshKey])
+
+  useEffect(() => {
+    if (!user || !activeLeague || !currentWeek.weekId) {
+      return
+    }
+
+    const liveGamesQuery = query(
+      collection(db, 'leagues', activeLeague.id, 'games'),
+      where('weekId', '==', currentWeek.weekId),
+      where('selected', '==', true),
+    )
+
+    const unsubscribe = onSnapshot(
+      liveGamesQuery,
+      (gamesSnapshot) => {
+        const updatedGames: Game[] = gamesSnapshot.docs
+          .map((gameDocument) => {
+            const data = gameDocument.data()
+
+            return {
+              id: gameDocument.id,
+              gameId: data.gameId,
+              gameName: data.gameName || '',
+              kickoff: data.kickoff,
+              selected: data.selected,
+              tiebreaker: data.tiebreaker,
+              order: data.order,
+              final: data.final === true,
+              winnerTeamId:
+                typeof data.winnerTeamId === 'string'
+                  ? data.winnerTeamId
+                  : null,
+              awayScore:
+                typeof data.awayScore === 'number'
+                  ? data.awayScore
+                  : null,
+              homeScore:
+                typeof data.homeScore === 'number'
+                  ? data.homeScore
+                  : null,
+              status:
+                typeof data.status === 'string'
+                  ? data.status
+                  : '',
+              statusState:
+                typeof data.statusState === 'string'
+                  ? data.statusState
+                  : '',
+              period:
+                typeof data.period === 'number'
+                  ? data.period
+                  : null,
+              displayClock:
+                typeof data.displayClock === 'string'
+                  ? data.displayClock
+                  : '',
+              awayTeam: {
+                id: data.awayTeamId,
+                name: data.awayTeamName,
+                rank: data.awayTeamRank,
+                logo: data.awayTeamLogo,
+                line: data.awayTeamLine,
+              },
+              homeTeam: {
+                id: data.homeTeamId,
+                name: data.homeTeamName,
+                rank: data.homeTeamRank,
+                logo: data.homeTeamLogo,
+                line: data.homeTeamLine,
+              },
+            }
+          })
+          .sort((a, b) => {
+            const kickoffDifference =
+              new Date(a.kickoff).getTime() -
+              new Date(b.kickoff).getTime()
+
+            if (kickoffDifference !== 0) {
+              return kickoffDifference
+            }
+
+            return a.order - b.order
+          })
+
+        setGames(updatedGames)
+      },
+      (error) => {
+        console.error('Live game update listener failed:', error)
+      },
+    )
+
+    return unsubscribe
+  }, [user, activeLeague?.id, currentWeek.weekId])
 
   async function generateUniqueJoinCode() {
     for (
