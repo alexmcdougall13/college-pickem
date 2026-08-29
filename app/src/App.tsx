@@ -774,10 +774,7 @@ function HomePage({
                             marginTop: 5,
                             fontSize: 10,
                             lineHeight: 1.15,
-                            color:
-                              game.statusState === 'in'
-                                ? '#1d4ed8'
-                                : '#64748b',
+                            color: '#64748b',
                             fontWeight:
                               game.statusState === 'in' || game.final
                                 ? 700
