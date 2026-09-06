@@ -7401,6 +7401,9 @@ function App() {
                       data.gameId ??
                         gameDocument.id,
                     ),
+                    kickoff: String(
+                      data.kickoff ?? '',
+                    ),
                     tiebreaker:
                       data.tiebreaker === true,
                   }
@@ -7460,18 +7463,34 @@ function App() {
               },
             )
 
-            let remaining = Math.max(
-              leagueGames.length -
-                completedGameIds.size,
-              0,
-            )
+            const actionableGames =
+              leagueGames.filter(
+                (game) => !isGameLocked(game.kickoff),
+              )
+
+            let remaining =
+              actionableGames.filter(
+                (game) =>
+                  !completedGameIds.has(
+                    game.gameId,
+                  ),
+              ).length
 
             const tiebreakerGame =
               leagueGames.find(
                 (game) => game.tiebreaker,
               )
 
-            if (tiebreakerGame) {
+            const tiebreakerActionable =
+              tiebreakerGame !== undefined &&
+              !isGameLocked(
+                tiebreakerGame.kickoff,
+              )
+
+            if (
+              tiebreakerGame &&
+              tiebreakerActionable
+            ) {
               const tiebreakerSnapshot =
                 await getDocs(
                   query(
@@ -10737,18 +10756,34 @@ function App() {
   const tiebreakerGame =
     games.find((game) => game.tiebreaker) ?? null
 
-  const gamePicksMade = Object.keys(picks).length
+  const actionableGames = games.filter(
+    (game) => !isGameLocked(game.kickoff),
+  )
+
+  const actionableGameIds = new Set(
+    actionableGames.map((game) => game.gameId),
+  )
+
+  const gamePicksMade = Object.keys(picks).filter(
+    (gameId) => actionableGameIds.has(gameId),
+  ).length
 
   const hasTiebreaker = tiebreakerGame !== null
 
   const tiebreakerCompleted =
     hasTiebreaker && tiebreaker.trim() !== ''
 
+  const tiebreakerActionable =
+    hasTiebreaker &&
+    !isGameLocked(tiebreakerGame.kickoff)
+
   const totalRequiredPicks =
-    games.length + (hasTiebreaker ? 1 : 0)
+    actionableGames.length +
+    (tiebreakerActionable ? 1 : 0)
 
   const completedPicks =
-    gamePicksMade + (tiebreakerCompleted ? 1 : 0)
+    gamePicksMade +
+    (tiebreakerActionable && tiebreakerCompleted ? 1 : 0)
 
   const picksRemaining = Math.max(
     totalRequiredPicks - completedPicks,
