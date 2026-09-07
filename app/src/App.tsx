@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef} from 'react'
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
@@ -341,6 +341,59 @@ function getHomeGameStatus(game: Game) {
 }
 
 
+function FittingTeamName({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [fontSize, setFontSize] = useState(11)
+
+  useEffect(() => {
+    const element = ref.current
+    if (!element) return
+
+    const fitText = () => {
+      const availableWidth = element.clientWidth
+      if (availableWidth <= 0) return
+
+      let size = 11
+      element.style.fontSize = `${size}px`
+
+      while (size > 8 && element.scrollWidth > availableWidth) {
+        size -= 0.25
+        element.style.fontSize = `${size}px`
+      }
+
+      setFontSize(size)
+    }
+
+    fitText()
+
+    const observer = new ResizeObserver(fitText)
+    observer.observe(element)
+
+    return () => observer.disconnect()
+  }, [children])
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        minWidth: 0,
+        width: '100%',
+        whiteSpace: 'nowrap',
+        overflow: 'visible',
+        textAlign: 'left',
+        fontSize: `${fontSize}px`,
+        letterSpacing: '-0.01em',
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
 type PickAgainstSpreadStatus = 'ahead' | 'behind' | 'push' | 'pending'
 
 function getPickAgainstSpreadStatus(
@@ -635,19 +688,6 @@ function HomePage({
 
                 {games.map((game) => {
                   const locked = isGameLocked(game.kickoff)
-                  const awayText = game.awayTeam.name
-                  const homeText = `at ${game.homeTeam.name}`
-                  const longestTeamLine = Math.max(
-                    awayText.length,
-                    homeText.length,
-                  )
-                  const sharedTeamFontSize = Math.max(
-                    8,
-                    Math.min(
-                      11,
-                      11 - Math.max(0, longestTeamLine - 16) * 0.18,
-                    ),
-                  )
 
                   return (
                     <div
@@ -693,28 +733,11 @@ function HomePage({
                               boxSizing: 'border-box',
                             }}
                           >
-                            <div
-                              style={{
-                                minWidth: 0,
-                                whiteSpace: 'nowrap',
-                                textAlign: 'left',
-                                fontSize: `${Math.min(
-                                  sharedTeamFontSize,
-                                  game.awayTeam.name.length > 18
-                                    ? 9
-                                    : game.awayTeam.name.length > 14
-                                      ? 10
-                                      : game.awayTeam.name.length > 11
-                                        ? 11
-                                        : sharedTeamFontSize,
-                                )}px`,
-                                letterSpacing: '-0.01em',
-                              }}
-                            >
+                            <FittingTeamName>
                               {game.awayTeam.rank
                                 ? `#${game.awayTeam.rank} ${game.awayTeam.name}`
                                 : game.awayTeam.name}
-                            </div>
+                            </FittingTeamName>
 
                             <span
                               style={{
@@ -742,29 +765,12 @@ function HomePage({
                               marginTop: 2,
                             }}
                           >
-                            <div
-                              style={{
-                                minWidth: 0,
-                                whiteSpace: 'nowrap',
-                                textAlign: 'left',
-                                fontSize: `${Math.min(
-                                  sharedTeamFontSize,
-                                  game.homeTeam.name.length > 18
-                                    ? 9
-                                    : game.homeTeam.name.length > 14
-                                      ? 10
-                                      : game.homeTeam.name.length > 11
-                                        ? 11
-                                        : sharedTeamFontSize,
-                                )}px`,
-                                letterSpacing: '-0.01em',
-                              }}
-                            >
+                            <FittingTeamName>
                               at{' '}
                               {game.homeTeam.rank
                                 ? `#${game.homeTeam.rank} ${game.homeTeam.name}`
                                 : game.homeTeam.name}
-                            </div>
+                            </FittingTeamName>
 
                             <span
                               style={{
