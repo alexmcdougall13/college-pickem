@@ -7265,6 +7265,7 @@ function App() {
   const [seasonWeeks, setSeasonWeeks] = useState<SeasonWeekData[]>([])
   const [gamesRefreshKey, setGamesRefreshKey] = useState(0)
   const [leagueBadgeCounts, setLeagueBadgeCounts] = useState<Record<string, number>>({})
+  const [badgeRefreshKey, setBadgeRefreshKey] = useState(0)
   const [notificationSupported, setNotificationSupported] = useState(true)
   const [notificationPermission, setNotificationPermission] =
     useState<NotificationPermission>(() =>
@@ -7550,7 +7551,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [user, availableLeagues])
+  }, [user, availableLeagues, badgeRefreshKey])
 
   function updateAppBadge(
     counts: Record<string, number>,
@@ -7584,6 +7585,30 @@ function App() {
       )
     })
   }
+
+  useEffect(() => {
+    const futureKickoffs = games
+      .map((game) => new Date(game.kickoff).getTime())
+      .filter(
+        (time) =>
+          Number.isFinite(time) &&
+          time > Date.now(),
+      )
+
+    if (futureKickoffs.length === 0) return
+
+    const nextKickoff = Math.min(...futureKickoffs)
+    const delay = Math.max(
+      nextKickoff - Date.now() + 1000,
+      0,
+    )
+
+    const timeoutId = window.setTimeout(() => {
+      setBadgeRefreshKey((value) => value + 1)
+    }, delay)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [games])
 
   useEffect(() => {
     updateAppBadge(leagueBadgeCounts)
