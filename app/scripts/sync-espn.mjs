@@ -247,15 +247,19 @@ function getAdjustedHomeLine(
     return null
   }
 
-  if (line > 0) {
-    return Math.floor(line) - 0.5
+  // Preserve ESPN half-point lines exactly.
+  // Move whole-number lines by 0.5 toward zero.
+  if (Number.isInteger(line)) {
+    if (line > 0) {
+      return line - 0.5
+    }
+
+    if (line < 0) {
+      return line + 0.5
+    }
   }
 
-  if (line < 0) {
-    return Math.ceil(line) + 0.5
-  }
-
-  return 0
+  return line
 }
 
 /*
