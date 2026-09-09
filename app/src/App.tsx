@@ -7272,6 +7272,7 @@ function App() {
   const [gamesRefreshKey, setGamesRefreshKey] = useState(0)
   const [leagueBadgeCounts, setLeagueBadgeCounts] = useState<Record<string, number>>({})
   const [badgeRefreshKey, setBadgeRefreshKey] = useState(0)
+  const [badgeGameIdsKey, setBadgeGameIdsKey] = useState('')
   const [notificationSupported, setNotificationSupported] = useState(true)
   const [notificationPermission, setNotificationPermission] =
     useState<NotificationPermission>(() =>
@@ -7557,7 +7558,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [user, availableLeagues, badgeRefreshKey])
+  }, [user, availableLeagues, badgeRefreshKey, badgeGameIdsKey])
 
   function updateAppBadge(
     counts: Record<string, number>,
@@ -9130,6 +9131,17 @@ function App() {
           })
 
         setGames(updatedGames)
+
+        const nextBadgeGameIdsKey = updatedGames
+          .map((game) => game.gameId)
+          .sort()
+          .join('|')
+
+        setBadgeGameIdsKey((current) =>
+          current === nextBadgeGameIdsKey
+            ? current
+            : nextBadgeGameIdsKey,
+        )
       },
       (error) => {
         console.error('Live game update listener failed:', error)
