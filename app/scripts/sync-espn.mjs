@@ -1615,6 +1615,30 @@ if (!mode) {
     }
   }
 } else if (
+  mode === 'check-scoreboard'
+) {
+  const date = process.argv[3] || '20260912'
+  const gameId = process.argv[4] || '401856677'
+
+  const data = await fetchScoreboard(date)
+  const events = data?.events ?? []
+  const event = events.find((item) => String(item?.id) === String(gameId))
+
+  console.log('')
+  console.log(`SCOREBOARD CHECK FOR ${gameId} ON ${date}`)
+  console.log(`Total ESPN events returned: ${events.length}`)
+  console.log(`Target event found: ${event ? 'YES' : 'NO'}`)
+  console.log('')
+
+  if (event) {
+    console.log(JSON.stringify({
+      id: event.id,
+      name: event.name,
+      status: event.status,
+      competitions: event.competitions,
+    }, null, 2))
+  }
+} else if (
   mode === 'postseason'
 ) {
   const season =
