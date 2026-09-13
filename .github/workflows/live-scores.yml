@@ -51,7 +51,7 @@ jobs:
           FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
           FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
 
-        run: node scripts/sync-espn.mjs check-scoreboard 20260912 401856677
+        run: node scripts/sync-espn.mjs
 
       - name: Send completed-week results
         env:

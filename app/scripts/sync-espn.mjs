@@ -1143,10 +1143,72 @@ async function getRelevantPublishedDates() {
   return [...dates].sort()
 }
 
-async function syncPublishedGames() {
-  const dates = await getRelevantPublishedDates()
+async function getRelevantPublishedGameIds() {
+  const [
+    legacySnapshot,
+    leagueSnapshot,
+  ] = await Promise.all([
+    db.collection('games').get(),
+    db.collectionGroup('games').get(),
+  ])
 
-  if (dates.length === 0) {
+  const documentsByPath = new Map()
+
+  for (const document of legacySnapshot.docs) {
+    documentsByPath.set(
+      document.ref.path,
+      document,
+    )
+  }
+
+  for (const document of leagueSnapshot.docs) {
+    documentsByPath.set(
+      document.ref.path,
+      document,
+    )
+  }
+
+  const now = Date.now()
+  const earliest =
+    now - 24 * 60 * 60 * 1000
+  const latest =
+    now + 24 * 60 * 60 * 1000
+
+  const gameIds = new Set()
+
+  documentsByPath.forEach((document) => {
+    const game = document.data()
+
+    if (
+      game.final === true ||
+      !game.kickoff ||
+      !game.gameId
+    ) {
+      return
+    }
+
+    const kickoffMs =
+      new Date(game.kickoff).getTime()
+
+    if (
+      Number.isFinite(kickoffMs) &&
+      kickoffMs >= earliest &&
+      kickoffMs <= latest
+    ) {
+      gameIds.add(
+        String(game.gameId),
+      )
+    }
+  })
+
+  return [...gameIds]
+}
+
+async function syncPublishedGames() {
+  const gameIds =
+    await getRelevantPublishedGameIds()
+
+  if (gameIds.length === 0) {
     console.log(
       'No published games are within the live-update window. Nothing to sync.',
     )
@@ -1154,28 +1216,54 @@ async function syncPublishedGames() {
   }
 
   console.log(
-    `Live score sync for ESPN date(s): ${dates.join(', ')}`,
+    `Live score sync for ${gameIds.length} published game(s) using ESPN per-game summaries.`,
   )
 
   let updated = 0
 
-  for (const date of dates) {
-    const data = await fetchScoreboard(date)
-    const events = data?.events ?? []
+  for (const gameId of gameIds) {
+    try {
+      const summary =
+        await fetchGameSummary(gameId)
 
-    for (const event of events) {
+      const competition =
+        summary?.header?.competitions?.[0]
+
+      if (!competition) {
+        console.warn(
+          `WARNING: ESPN summary returned no competition for published game ${gameId}.`,
+        )
+        continue
+      }
+
+      const event = {
+        id: gameId,
+        status:
+          competition.status ?? {},
+        competitions: [
+          competition,
+        ],
+      }
+
       if (
         await updatePublishedGameFromEvent(
           event,
-          { verifySummary: true },
+          { verifySummary: false },
         )
       ) {
         updated += 1
       }
+    } catch (error) {
+      console.warn(
+        `WARNING: Could not refresh published game ${gameId} from ESPN summary.`,
+        error?.message ?? error,
+      )
     }
   }
 
-  console.log(`Updated ${updated} published game(s) with live ESPN data.`)
+  console.log(
+    `Updated ${updated} published game(s) with live ESPN data.`,
+  )
 }
 
 /*
