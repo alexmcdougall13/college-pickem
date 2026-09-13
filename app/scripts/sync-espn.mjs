@@ -4,6 +4,9 @@ import { getFirestore } from 'firebase-admin/firestore'
 const ESPN_SCOREBOARD =
   'https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard'
 
+const ESPN_GAME_SUMMARY =
+  'https://site.api.espn.com/apis/site/v2/sports/football/college-football/summary'
+
 const ESPN_GAME_STATUS =
   'https://sports.core.api.espn.com/v2/sports/football/leagues/college-football/events'
 
@@ -448,6 +451,21 @@ async function fetchScoreboard(dateOrRange) {
   if (!response.ok) {
     throw new Error(
       `ESPN scoreboard request failed for ${dateOrRange}: ${response.status}`,
+    )
+  }
+
+  return response.json()
+}
+
+async function fetchGameSummary(gameId) {
+  const response =
+    await fetch(
+      `${ESPN_GAME_SUMMARY}?event=${encodeURIComponent(gameId)}`,
+    )
+
+  if (!response.ok) {
+    throw new Error(
+      `ESPN game summary request failed for ${gameId}: ${response.status}`,
     )
   }
 
@@ -926,11 +944,55 @@ function parseGame(
 }
 
 
-async function updatePublishedGameFromEvent(event) {
-  const competition = event?.competitions?.[0]
+async function updatePublishedGameFromEvent(
+  event,
+  { verifySummary = false } = {},
+) {
+  let competition = event?.competitions?.[0]
 
   if (!event?.id || !competition) {
     return false
+  }
+
+  const gameId = String(event.id)
+
+  /*
+   * The scoreboard can occasionally lag behind the actual live game.
+   * Verify the game through ESPN's per-game summary endpoint before
+   * writing live scores/status to Firestore.
+   *
+   * If the summary endpoint is temporarily unavailable, fall back to
+   * the scoreboard event so a transient ESPN API problem does not stop
+   * the entire live-sync job.
+   */
+  if (verifySummary) {
+    try {
+      const summary =
+        await fetchGameSummary(gameId)
+
+      const summaryCompetition =
+        summary?.header?.competitions?.[0]
+
+      if (summaryCompetition) {
+        competition =
+          summaryCompetition
+
+        event = {
+          ...event,
+          status:
+            summaryCompetition.status ??
+            event.status,
+          competitions: [
+            summaryCompetition,
+          ],
+        }
+      }
+    } catch (error) {
+      console.warn(
+        `WARNING: Could not verify ESPN game ${gameId} through the summary endpoint. Falling back to scoreboard data.`,
+        error?.message ?? error,
+      )
+    }
   }
 
   const away = competition.competitors?.find(
@@ -945,7 +1007,6 @@ async function updatePublishedGameFromEvent(event) {
     return false
   }
 
-  const gameId = String(event.id)
   const liveStatus = await getLiveStatus(event)
 
   const liveFields = {
@@ -1103,7 +1164,12 @@ async function syncPublishedGames() {
     const events = data?.events ?? []
 
     for (const event of events) {
-      if (await updatePublishedGameFromEvent(event)) {
+      if (
+        await updatePublishedGameFromEvent(
+          event,
+          { verifySummary: true },
+        )
+      ) {
         updated += 1
       }
     }
