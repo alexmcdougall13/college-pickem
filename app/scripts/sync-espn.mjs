@@ -4,6 +4,9 @@ import { getFirestore } from 'firebase-admin/firestore'
 const ESPN_SCOREBOARD =
   'https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard'
 
+const ESPN_SUMMARY =
+  'https://site.api.espn.com/apis/site/v2/sports/football/college-football/summary'
+
 const ESPN_TEAM =
   'https://site.api.espn.com/apis/site/v2/sports/football/college-football/teams'
 
@@ -194,18 +197,68 @@ function getScore(competitor) {
   return Number.isFinite(score) ? score : null
 }
 
-function getLiveStatus(event) {
-  const status = event?.status ?? {}
-  const type = status?.type ?? {}
+async function getLiveStatus(event) {
+  const fallbackStatus = event?.status ?? {}
+  const fallbackType = fallbackStatus?.type ?? {}
 
-  return {
-    status: type?.shortDetail ?? '',
-    statusState: type?.state ?? '',
-    period: Number.isFinite(Number(status?.period))
-      ? Number(status.period)
+  const fallback = {
+    status: fallbackType?.shortDetail ?? '',
+    statusState: fallbackType?.state ?? '',
+    period: Number.isFinite(Number(fallbackStatus?.period))
+      ? Number(fallbackStatus.period)
       : null,
-    displayClock: status?.displayClock ?? '',
-    final: type?.completed === true,
+    displayClock: fallbackStatus?.displayClock ?? '',
+    final: fallbackType?.completed === true,
+  }
+
+  if (!event?.id) {
+    return fallback
+  }
+
+  try {
+    const response = await fetch(
+      `${ESPN_SUMMARY}?event=${encodeURIComponent(String(event.id))}`,
+    )
+
+    if (!response.ok) {
+      console.warn(
+        `ESPN summary request failed for ${event.id}: ${response.status}`,
+      )
+      return fallback
+    }
+
+    const summary = await response.json()
+
+    const competition =
+      summary?.header?.competitions?.[0]
+
+    const status =
+      competition?.status ??
+      summary?.header?.competitions?.[0]?.status ??
+      {}
+
+    const type = status?.type ?? {}
+
+    return {
+      status: type?.shortDetail ?? fallback.status,
+      statusState: type?.state ?? fallback.statusState,
+      period: Number.isFinite(Number(status?.period))
+        ? Number(status.period)
+        : fallback.period,
+      displayClock:
+        status?.displayClock ?? fallback.displayClock,
+      final:
+        type?.completed === true
+          ? true
+          : fallback.final,
+    }
+  } catch (error) {
+    console.warn(
+      `Unable to fetch ESPN summary for ${event.id}; using scoreboard status.`,
+      error,
+    )
+
+    return fallback
   }
 }
 
@@ -890,7 +943,7 @@ async function updatePublishedGameFromEvent(event) {
   }
 
   const gameId = String(event.id)
-  const liveStatus = getLiveStatus(event)
+  const liveStatus = await getLiveStatus(event)
 
   const liveFields = {
     awayScore: getScore(away),
