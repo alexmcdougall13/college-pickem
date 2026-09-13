@@ -1551,6 +1551,70 @@ if (!mode) {
     week,
   )
 } else if (
+  mode === 'diagnose'
+) {
+  const gameId =
+    process.argv[3]
+
+  if (!gameId) {
+    throw new Error(
+      'Diagnose mode requires an ESPN game ID. Example: node scripts/sync-espn.mjs diagnose 401856677',
+    )
+  }
+
+  const [
+    legacySnapshot,
+    leagueSnapshot,
+  ] = await Promise.all([
+    db.collection('games').doc(gameId).get(),
+    db.collectionGroup('games')
+      .where('gameId', '==', gameId)
+      .get(),
+  ])
+
+  console.log('')
+  console.log(`DIAGNOSTIC REPORT FOR ESPN GAME ${gameId}`)
+  console.log('')
+
+  const documents = []
+
+  if (legacySnapshot.exists) {
+    documents.push(legacySnapshot)
+  }
+
+  for (const document of leagueSnapshot.docs) {
+    if (
+      document.ref.path !==
+      legacySnapshot.ref.path
+    ) {
+      documents.push(document)
+    }
+  }
+
+  if (documents.length === 0) {
+    console.log(
+      'NO FIRESTORE DOCUMENTS FOUND FOR THIS GAME.',
+    )
+  } else {
+    for (const document of documents) {
+      const data = document.data()
+
+      console.log(`PATH: ${document.ref.path}`)
+      console.log(`gameId: ${data.gameId ?? ''}`)
+      console.log(`final: ${data.final ?? ''}`)
+      console.log(`status: ${data.status ?? ''}`)
+      console.log(`statusState: ${data.statusState ?? ''}`)
+      console.log(`period: ${data.period ?? ''}`)
+      console.log(`displayClock: ${data.displayClock ?? ''}`)
+      console.log(`awayScore: ${data.awayScore ?? ''}`)
+      console.log(`homeScore: ${data.homeScore ?? ''}`)
+      console.log(
+        `scoreUpdatedAt: ${data.scoreUpdatedAt?.toDate?.()?.toISOString?.() ?? data.scoreUpdatedAt ?? ''}`,
+      )
+      console.log('')
+    }
+  }
+} else if (
   mode === 'postseason'
 ) {
   const season =
