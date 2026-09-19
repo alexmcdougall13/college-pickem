@@ -17,9 +17,6 @@ on:
           - 'true'
         default: 'false'
 
-  schedule:
-    - cron: '3,13,23,33,43,53 * * * *'
-
 jobs:
   remind:
     runs-on: ubuntu-latest
