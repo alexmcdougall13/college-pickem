@@ -438,6 +438,99 @@ async function collectLeague(
         .collection('members')
         .get()
 
+    /*
+     * Read all picks for the week once,
+     * then group them by user in memory.
+     */
+    const picksSnapshot =
+      await db
+        .collection('leagues')
+        .doc(leagueId)
+        .collection('picks')
+        .where(
+          'weekId',
+          '==',
+          weekId,
+        )
+        .get()
+
+    const pickedGameIdsByUser =
+      new Map()
+
+    for (
+      const pickDoc of
+      picksSnapshot.docs
+    ) {
+      const pick =
+        pickDoc.data()
+
+      if (!pick.userId || !pick.gameId) {
+        continue
+      }
+
+      const userId =
+        String(
+          pick.userId,
+        )
+
+      const existing =
+        pickedGameIdsByUser.get(
+          userId,
+        ) ?? new Set()
+
+      existing.add(
+        String(
+          pick.gameId,
+        ),
+      )
+
+      pickedGameIdsByUser.set(
+        userId,
+        existing,
+      )
+    }
+
+    /*
+     * Read all tiebreakers for the week once,
+     * then group them by user in memory.
+     */
+    let tiebreakerUsers =
+      new Set()
+
+    const tiebreakerGame =
+      dueGames.find(
+        (game) =>
+          game.tiebreaker,
+      )
+
+    if (tiebreakerGame) {
+      const tiebreakersSnapshot =
+        await db
+          .collection('leagues')
+          .doc(leagueId)
+          .collection(
+            'tiebreakers',
+          )
+          .where(
+            'weekId',
+            '==',
+            weekId,
+          )
+          .get()
+
+      tiebreakerUsers =
+        new Set(
+          tiebreakersSnapshot.docs
+            .map(
+              (doc) =>
+                doc.data()
+                  .userId,
+            )
+            .filter(Boolean)
+            .map(String),
+        )
+    }
+
     for (
       const memberDoc of
       membersSnapshot.docs
@@ -457,34 +550,10 @@ async function collectLeague(
             memberDoc.id,
         )
 
-      const picksSnapshot =
-        await db
-          .collection('leagues')
-          .doc(leagueId)
-          .collection('picks')
-          .where(
-            'userId',
-            '==',
-            userId,
-          )
-          .where(
-            'weekId',
-            '==',
-            weekId,
-          )
-          .get()
-
       const pickedGameIds =
-        new Set(
-          picksSnapshot.docs
-            .map(
-              (doc) =>
-                doc.data()
-                  .gameId,
-            )
-            .filter(Boolean)
-            .map(String),
-        )
+        pickedGameIdsByUser.get(
+          userId,
+        ) ?? new Set()
 
       const totalRemainingGames =
         futureGames.filter(
@@ -526,34 +595,11 @@ async function collectLeague(
       let missingTiebreaker =
         false
 
-      const tiebreakerGame =
-        dueGames.find(
-          (game) =>
-            game.tiebreaker,
-        )
-
       if (tiebreakerGame) {
-        const tiebreakersSnapshot =
-          await db
-            .collection('leagues')
-            .doc(leagueId)
-            .collection(
-              'tiebreakers',
-            )
-            .where(
-              'userId',
-              '==',
-              userId,
-            )
-            .where(
-              'weekId',
-              '==',
-              weekId,
-            )
-            .get()
-
         if (
-          tiebreakersSnapshot.empty
+          !tiebreakerUsers.has(
+            userId,
+          )
         ) {
           const sent =
             await alreadyReminded(
