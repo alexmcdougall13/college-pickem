@@ -1074,132 +1074,100 @@ async function updatePublishedGameFromEvent(
   return updated
 }
 
-async function getRelevantPublishedDates() {
-  /*
-   * Check both the original global games and every league's
-   * published games while we are migrating.
-   */
-  const [
-    legacySnapshot,
-    leagueSnapshot,
-  ] = await Promise.all([
-    db.collection('games').get(),
-    db.collectionGroup('games').get(),
-  ])
-
-  const documentsByPath = new Map()
-
-  for (const document of legacySnapshot.docs) {
-    documentsByPath.set(
-      document.ref.path,
-      document,
-    )
-  }
-
-  for (const document of leagueSnapshot.docs) {
-    documentsByPath.set(
-      document.ref.path,
-      document,
-    )
-  }
-
-  const snapshot = {
-    forEach(callback) {
-      documentsByPath.forEach(callback)
-    },
-  }
-
-  const now = Date.now()
-
-  /*
-   * Include games beginning within the next 24 hours and games
-   * that began within the previous 8 hours. This covers the
-   * pregame/live/final window without repeatedly asking ESPN
-   * about future weeks.
-   */
-  const earliest = now - 24 * 60 * 60 * 1000
-  const latest = now + 24 * 60 * 60 * 1000
-
-  const dates = new Set()
-
-  snapshot.forEach((document) => {
-    const game = document.data()
-
-    if (game.final === true || !game.kickoff) {
-      return
-    }
-
-    const kickoffMs = new Date(game.kickoff).getTime()
-
-    if (
-      Number.isFinite(kickoffMs) &&
-      kickoffMs >= earliest &&
-      kickoffMs <= latest
-    ) {
-      dates.add(formatEspnDate(game.kickoff))
-    }
-  })
-
-  return [...dates].sort()
-}
-
 async function getRelevantPublishedGameIds() {
+  const now = Date.now()
+
+  /*
+   * Include games that started within the previous 24 hours
+   * and games starting within the next 24 hours.
+   *
+   * The legacy global games use an ISO kickoff string.
+   * League games use a Firestore Timestamp.
+   *
+   * IMPORTANT: Use targeted range queries instead of reading
+   * every game in both collections on every live-score run.
+   */
+  const earliestMs =
+    now - 24 * 60 * 60 * 1000
+
+  const latestMs =
+    now + 24 * 60 * 60 * 1000
+
+  const earliestDate =
+    new Date(earliestMs)
+
+  const latestDate =
+    new Date(latestMs)
+
+  const earliestIso =
+    earliestDate.toISOString()
+
+  const latestIso =
+    latestDate.toISOString()
+
   const [
     legacySnapshot,
     leagueSnapshot,
   ] = await Promise.all([
-    db.collection('games').get(),
-    db.collectionGroup('games').get(),
+    /*
+     * Legacy global games store kickoff as an ISO string.
+     */
+    db
+      .collection('games')
+      .where('kickoff', '>=', earliestIso)
+      .where('kickoff', '<=', latestIso)
+      .get(),
+
+    /*
+     * Published league games store kickoffTimestamp
+     * as a Firestore Timestamp.
+     */
+    db
+      .collectionGroup('games')
+      .where(
+        'kickoffTimestamp',
+        '>=',
+        earliestDate,
+      )
+      .where(
+        'kickoffTimestamp',
+        '<=',
+        latestDate,
+      )
+      .get(),
   ])
-
-  const documentsByPath = new Map()
-
-  for (const document of legacySnapshot.docs) {
-    documentsByPath.set(
-      document.ref.path,
-      document,
-    )
-  }
-
-  for (const document of leagueSnapshot.docs) {
-    documentsByPath.set(
-      document.ref.path,
-      document,
-    )
-  }
-
-  const now = Date.now()
-  const earliest =
-    now - 24 * 60 * 60 * 1000
-  const latest =
-    now + 24 * 60 * 60 * 1000
 
   const gameIds = new Set()
 
-  documentsByPath.forEach((document) => {
+  for (const document of legacySnapshot.docs) {
     const game = document.data()
 
     if (
       game.final === true ||
-      !game.kickoff ||
       !game.gameId
     ) {
-      return
+      continue
     }
 
-    const kickoffMs =
-      new Date(game.kickoff).getTime()
+    gameIds.add(
+      String(game.gameId),
+    )
+  }
+
+  for (const document of leagueSnapshot.docs) {
+    const game = document.data()
 
     if (
-      Number.isFinite(kickoffMs) &&
-      kickoffMs >= earliest &&
-      kickoffMs <= latest
+      game.final === true ||
+      !game.gameId
     ) {
-      gameIds.add(
-        String(game.gameId),
-      )
+      continue
     }
-  })
+
+    gameIds.add(
+      String(game.gameId),
+    )
+  }
 
   return [...gameIds]
 }
