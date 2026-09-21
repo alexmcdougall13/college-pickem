@@ -442,10 +442,17 @@ function calculateRating({
  * ============================================================
  */
 
-async function fetchScoreboard(dateOrRange) {
+async function fetchScoreboard(
+  dateOrRange,
+  includeAllGroups = false,
+) {
+  const query = includeAllGroups
+    ? `dates=${dateOrRange}&limit=100`
+    : `dates=${dateOrRange}&groups=80&limit=1000`
+
   const response =
     await fetch(
-      `${ESPN_SCOREBOARD}?dates=${dateOrRange}&groups=80&limit=1000`,
+      `${ESPN_SCOREBOARD}?${query}`,
     )
 
   if (!response.ok) {
@@ -544,15 +551,50 @@ async function fetchRegularWeekScoreboard(
   season,
   week,
 ) {
+  const {
+    start,
+    end,
+  } =
+    getRegularWeekDateRange(
+      season,
+      week,
+    )
+
   console.log(
-    `Loading ESPN regular-season Week ${week} using season/week parameters...`,
+    `Loading ESPN regular-season Week ${week} from ${start} through ${end}...`,
   )
 
-  return fetchScoreboardWeek(
-    season,
-    week,
-    2,
+  const startDate = new Date(
+    `${start.slice(0, 4)}-${start.slice(4, 6)}-${start.slice(6, 8)}T00:00:00Z`,
   )
+  const endDate = new Date(
+    `${end.slice(0, 4)}-${end.slice(4, 6)}-${end.slice(6, 8)}T00:00:00Z`,
+  )
+
+  const events = []
+
+  for (
+    let date = new Date(startDate);
+    date <= endDate;
+    date.setUTCDate(date.getUTCDate() + 1)
+  ) {
+    const dateString = [
+      date.getUTCFullYear(),
+      String(date.getUTCMonth() + 1).padStart(2, '0'),
+      String(date.getUTCDate()).padStart(2, '0'),
+    ].join('')
+
+    const data = await fetchScoreboard(
+      dateString,
+      true,
+    )
+
+    events.push(...(data.events ?? []))
+  }
+
+  return {
+    events,
+  }
 }
 
 async function fetchScoreboardWeek(
