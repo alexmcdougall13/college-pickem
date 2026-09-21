@@ -544,21 +544,14 @@ async function fetchRegularWeekScoreboard(
   season,
   week,
 ) {
-  const {
-    start,
-    end,
-  } =
-    getRegularWeekDateRange(
-      season,
-      week,
-    )
-
   console.log(
-    `ESPN date range for Week ${week}: ${start}-${end}`,
+    `Loading ESPN regular-season Week ${week} using season/week parameters...`,
   )
 
-  return fetchScoreboard(
-    `${start}-${end}`,
+  return fetchScoreboardWeek(
+    season,
+    week,
+    2,
   )
 }
 
