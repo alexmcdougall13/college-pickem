@@ -2,12 +2,10 @@ import {
   cert,
   initializeApp,
 } from 'firebase-admin/app'
-
 import {
   FieldValue,
   getFirestore,
 } from 'firebase-admin/firestore'
-
 import {
   getMessaging,
 } from 'firebase-admin/messaging'
@@ -15,10 +13,8 @@ import {
 const serviceAccount = {
   projectId:
     process.env.FIREBASE_PROJECT_ID,
-
   clientEmail:
     process.env.FIREBASE_CLIENT_EMAIL,
-
   privateKey:
     process.env.FIREBASE_PRIVATE_KEY?.replace(
       /\\n/g,
@@ -319,97 +315,121 @@ async function displayNameForMember(
   return 'Player'
 }
 
+const activeLeagueCountCache = new Map()
+
 async function activeLeagueCountForUser(
   userId,
 ) {
-  const leaguesSnapshot =
-    await db
-      .collection('leagues')
-      .get()
-
-  let count = 0
-
-  for (
-    const leagueDocument of
-    leaguesSnapshot.docs
-  ) {
-    const memberSnapshot =
-      await db
-        .collection('leagues')
-        .doc(leagueDocument.id)
-        .collection('members')
-        .doc(userId)
-        .get()
-
-    if (
-      memberSnapshot.exists &&
-      memberSnapshot.data()
-        .active !== false
-    ) {
-      count += 1
-    }
+  if (activeLeagueCountCache.has(userId)) {
+    return activeLeagueCountCache.get(userId)
   }
 
-  return count
+  const countPromise = (async () => {
+    const leaguesSnapshot =
+      await db
+        .collection('leagues')
+        .get()
+
+    let count = 0
+
+    for (
+      const leagueDocument of
+      leaguesSnapshot.docs
+    ) {
+      const memberSnapshot =
+        await db
+          .collection('leagues')
+          .doc(leagueDocument.id)
+          .collection('members')
+          .doc(userId)
+          .get()
+
+      if (
+        memberSnapshot.exists &&
+        memberSnapshot.data()
+          .active !== false
+      ) {
+        count += 1
+      }
+    }
+
+    return count
+  })()
+
+  activeLeagueCountCache.set(userId, countPromise)
+
+  return countPromise
 }
+
+const enabledFidsCache = new Map()
 
 async function enabledFidsForUser(
   userId,
 ) {
-  const userSnapshot =
-    await db
-      .collection('users')
-      .doc(userId)
-      .get()
+  if (enabledFidsCache.has(userId)) {
+    return enabledFidsCache.get(userId)
+  }
 
-  if (
-    userSnapshot.exists &&
-    userSnapshot.data()
-      .notificationPreferences
-      ?.weekResults === false
-  ) {
-    return {
-      disabled: true,
-      fids: [],
+  const resultPromise = (async () => {
+    const userSnapshot =
+      await db
+        .collection('users')
+        .doc(userId)
+        .get()
+
+    if (
+      userSnapshot.exists &&
+      userSnapshot.data()
+        .notificationPreferences
+        ?.weekResults === false
+    ) {
+      return {
+        disabled: true,
+        fids: [],
+      }
     }
-  }
 
-  const registrations =
-    await db
-      .collection('users')
-      .doc(userId)
-      .collection(
-        'notificationRegistrations',
+    const registrations =
+      await db
+        .collection('users')
+        .doc(userId)
+        .collection(
+          'notificationRegistrations',
+        )
+        .where(
+          'enabled',
+          '==',
+          true,
+        )
+        .get()
+
+    const fids =
+      Array.from(
+        new Set(
+          registrations.docs
+            .map(
+              (document) =>
+                document.data()
+                  .installationId,
+            )
+            .filter(
+              (fid) =>
+                typeof fid ===
+                  'string' &&
+                fid.length > 0,
+            ),
+        ),
       )
-      .where(
-        'enabled',
-        '==',
-        true,
-      )
-      .get()
 
-  const fids =
-    Array.from(
-      new Set(
-        registrations.docs
-          .map(
-            (document) =>
-              document.data()
-                .installationId,
-          )
-          .filter(
-            (fid) =>
-              typeof fid ===
-                'string' &&
-              fid.length > 0,
-          ),
-      ),
-    )
+    return {
+      disabled: false,
+      fids,
+    }
+  })()
 
-  return {
-    disabled: false,
-    fids,
-  }
+  enabledFidsCache.set(userId, resultPromise)
+
+  return resultPromise
 }
 
 function resultMarkerId(
@@ -941,7 +961,6 @@ async function processWeek(
       await messaging
         .sendEachForMulticast({
           fids,
-
           notification: {
             title:
               TEST_MODE
@@ -949,16 +968,12 @@ async function processWeek(
                   ? `${leagueName} — TEST Results`
                   : 'TEST Results'
                 : resultTitle,
-
             body,
           },
-
           data: {
             type:
               'week-results',
-
             leagueId,
-
             weekId,
           },
         })
@@ -968,7 +983,6 @@ async function processWeek(
       0
     ) {
       usersNotified += 1
-
       devicesNotified +=
         response.successCount
     }
@@ -1012,13 +1026,13 @@ async function processWeek(
    * If everyone has results notifications disabled or has
    * no registered device, a later run may try again.
    */
+
   if (
     usersNotified === 0
   ) {
     console.log(
       `${leagueName} ${weekLabel} is final, but no results notifications were delivered.`,
     )
-
     return false
   }
 
@@ -1028,26 +1042,18 @@ async function processWeek(
     await markerRef.set({
       type:
         'week-results',
-
       weekId,
-
       weekLabel,
-
       winnerIds:
         winners.map(
           (winner) =>
             winner.userId,
         ),
-
       winnerNames,
-
       winningScore:
         winningRecord.correct,
-
       usersNotified,
-
       devicesNotified,
-
       sentAt:
         FieldValue.serverTimestamp(),
     })

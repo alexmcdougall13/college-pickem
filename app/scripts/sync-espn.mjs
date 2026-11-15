@@ -3,13 +3,10 @@ import { getFirestore } from 'firebase-admin/firestore'
 
 const ESPN_SCOREBOARD =
   'https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard'
-
 const ESPN_GAME_SUMMARY =
   'https://site.api.espn.com/apis/site/v2/sports/football/college-football/summary'
-
 const ESPN_GAME_STATUS =
   'https://sports.core.api.espn.com/v2/sports/football/leagues/college-football/events'
-
 const ESPN_TEAM =
   'https://site.api.espn.com/apis/site/v2/sports/football/college-football/teams'
 
@@ -30,26 +27,21 @@ const RATING_CONFIG = {
     spread: 0.25,
     conference: 0.25,
   },
-
   combinedUnrankedValue: 50,
   differenceUnrankedValue: 26,
-
   conferenceValues: {
     'Big Ten': 5,
     SEC: 5,
     Independent: 5,
-
     ACC: 4,
     'Big 12': 4,
     'Pac-12': 4,
-
     AAC: 2,
     CUSA: 2,
     MAC: 2,
     MWC: 2,
     'Sun Belt': 2,
     Other: 2,
-
     FCS: 0,
   },
 }
@@ -59,7 +51,6 @@ const RATING_CONFIG = {
  * FIREBASE
  * ============================================================
  */
-
 const serviceAccount = {
   projectId: process.env.FIREBASE_PROJECT_ID,
   clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
@@ -90,7 +81,6 @@ const db = getFirestore()
  * HELPERS
  * ============================================================
  */
-
 function roundToTwo(value) {
   return Math.round(
     (value + Number.EPSILON) * 100,
@@ -104,44 +94,33 @@ function normalizeConferenceName(name = '') {
   const conferenceMap = {
     'southeastern conference': 'SEC',
     sec: 'SEC',
-
     'big ten conference': 'Big Ten',
     'big ten': 'Big Ten',
-
     'atlantic coast conference': 'ACC',
     acc: 'ACC',
-
     'big 12 conference': 'Big 12',
     'big 12': 'Big 12',
-
     'pac-12 conference': 'Pac-12',
     'pac-12': 'Pac-12',
-
     'american athletic conference': 'AAC',
     'american conference': 'AAC',
     'the american': 'AAC',
     american: 'AAC',
     aac: 'AAC',
-
     'conference usa': 'CUSA',
     'conference-usa': 'CUSA',
     cusa: 'CUSA',
-
     'mid-american conference': 'MAC',
     'mid-american': 'MAC',
     mac: 'MAC',
-
     'mountain west conference': 'MWC',
     'mountain west': 'MWC',
     mwc: 'MWC',
-
     'sun belt conference': 'Sun Belt',
     'sun belt': 'Sun Belt',
-
     independent: 'Independent',
     independents: 'Independent',
     'fbs independents': 'Independent',
-
     fcs: 'FCS',
   }
 
@@ -193,7 +172,6 @@ function getGameName(event) {
   return ''
 }
 
-
 function getScore(competitor) {
   const score = Number(competitor?.score)
 
@@ -229,6 +207,7 @@ async function getLiveStatus(event) {
       console.warn(
         `ESPN game-status request failed for ${gameId}: ${response.status}`,
       )
+
       return fallback
     }
 
@@ -266,7 +245,6 @@ async function getLiveStatus(event) {
     return fallback
   }
 }
-
 
 function formatEspnDate(dateValue) {
   const date = new Date(dateValue)
@@ -326,7 +304,6 @@ function getAdjustedHomeLine(
  * RATING CALCULATION
  * ============================================================
  */
-
 function calculateRating({
   awayRank,
   homeRank,
@@ -441,7 +418,6 @@ function calculateRating({
  * ESPN REQUESTS
  * ============================================================
  */
-
 async function fetchScoreboard(
   dateOrRange,
   includeAllGroups = false,
@@ -567,6 +543,7 @@ async function fetchRegularWeekScoreboard(
   const startDate = new Date(
     `${start.slice(0, 4)}-${start.slice(4, 6)}-${start.slice(6, 8)}T00:00:00Z`,
   )
+
   const endDate = new Date(
     `${end.slice(0, 4)}-${end.slice(4, 6)}-${end.slice(6, 8)}T00:00:00Z`,
   )
@@ -725,13 +702,11 @@ async function fetchTeamConference(
 
     return {
       teamId: String(team.id),
-
       teamName:
         team.location ??
         team.shortDisplayName ??
         team.displayName ??
         'Unknown',
-
       conference: null,
     }
   }
@@ -746,13 +721,11 @@ async function fetchTeamConference(
 
   return {
     teamId: String(team.id),
-
     teamName:
       team.location ??
       team.shortDisplayName ??
       team.displayName ??
       'Unknown',
-
     conference,
   }
 }
@@ -807,7 +780,6 @@ async function fetchConferenceMap(
  * GAME PARSER
  * ============================================================
  */
-
 function parseGame(
   event,
   conferenceMap,
@@ -898,90 +870,67 @@ function parseGame(
   return {
     gameId:
       String(event.id),
-
     seasonWeek:
       event?.week?.number ??
       null,
-
     gameName:
       getGameName(event),
-
     kickoff:
       event.date ?? '',
-
     awayTeamId,
-
     awayTeamName:
       away.team?.location ??
       away.team
         ?.shortDisplayName ??
       away.team?.displayName ??
       'Away',
-
     awayTeamRank:
       awayRank,
-
     awayTeamLogo:
       away.team?.logo ?? '',
-
     awayConference,
-
     homeTeamId,
-
     homeTeamName:
       home.team?.location ??
       home.team
         ?.shortDisplayName ??
       home.team?.displayName ??
       'Home',
-
     homeTeamRank:
       homeRank,
-
     homeTeamLogo:
       home.team?.logo ?? '',
-
     homeConference,
-
     homeTeamLine:
       homeLine,
-
     awayScore:
       getScore(away),
-
     homeScore:
       getScore(home),
-
     ...getLiveStatus(event),
-
     combinedRating:
       ratings.combined,
-
     differenceRating:
       ratings.difference,
-
     spreadRating:
       ratings.spread,
-
     conferenceRating:
       ratings.conference,
-
     rating:
       ratings.rating,
-
     selected: false,
-
     tiebreaker: false,
-
     importedAt:
       new Date(),
   }
 }
 
-
 async function updatePublishedGameFromEvent(
   event,
-  { verifySummary = false } = {},
+  {
+    verifySummary = false,
+    targetDocuments = null,
+  } = {},
 ) {
   let competition = event?.competitions?.[0]
 
@@ -1052,208 +1001,169 @@ async function updatePublishedGameFromEvent(
     period: liveStatus.period,
     displayClock: liveStatus.displayClock,
     final: liveStatus.final,
-    scoreUpdatedAt: new Date(),
   }
 
   /*
-   * Keep updating the original global game during migration.
-   * This gives us a backup until the legacy structure is retired.
-   */
-  const legacyRef = db.collection('games').doc(gameId)
-  const legacySnapshot = await legacyRef.get()
-
-  let updated = false
-
-  if (legacySnapshot.exists) {
-    await legacyRef.set(
-      liveFields,
-      { merge: true },
-    )
-
-    updated = true
-  }
-
-  /*
-   * Update every league that has this ESPN game published.
+   * When the caller already queried the live-update window, reuse
+   * those snapshots instead of issuing one legacy read and one
+   * collection-group query for every ESPN game.
    *
-   * This is what allows the same game to appear in multiple
-   * independent pools while ESPN only needs to be queried once.
+   * Other sync modes (date/week imports) retain the original lookup
+   * behavior by leaving targetDocuments as null.
    */
-  const leagueGamesSnapshot = await db
-    .collectionGroup('games')
-    .where('gameId', '==', gameId)
-    .get()
+  let documents = targetDocuments
+
+  if (documents === null) {
+    const legacyRef = db.collection('games').doc(gameId)
+
+    const [legacySnapshot, leagueGamesSnapshot] = await Promise.all([
+      legacyRef.get(),
+
+      db.collectionGroup('games')
+        .where('gameId', '==', gameId)
+        .get(),
+
+    ])
+
+    documents = []
+
+    if (legacySnapshot.exists) {
+      documents.push(legacySnapshot)
+    }
+
+    for (const document of leagueGamesSnapshot.docs) {
+      if (document.ref.path !== legacyRef.path) {
+        documents.push(document)
+      }
+    }
+  }
+
+  const changedDocuments = documents.filter((document) => {
+    const existing = document.data()
+
+    return Object.entries(liveFields).some(
+      ([field, value]) => existing[field] !== value,
+    )
+  })
+
+  if (changedDocuments.length === 0) {
+    return false
+  }
 
   const writer = db.bulkWriter()
 
-  for (const gameDocument of leagueGamesSnapshot.docs) {
-    /*
-     * Avoid writing the root legacy copy twice if Firestore
-     * happens to include it in the collection-group query.
-     */
-    if (gameDocument.ref.path === legacyRef.path) {
-      continue
-    }
-
+  for (const document of changedDocuments) {
     writer.set(
-      gameDocument.ref,
-      liveFields,
+      document.ref,
+      {
+        ...liveFields,
+        scoreUpdatedAt: new Date(),
+      },
       { merge: true },
     )
-
-    updated = true
   }
 
   await writer.close()
 
-  return updated
+  return true
 }
 
-async function getRelevantPublishedGameIds() {
+async function getRelevantPublishedGames() {
   const now = Date.now()
 
-  /*
-   * Include games that started within the previous 24 hours
-   * and games starting within the next 24 hours.
-   *
-   * The legacy global games use an ISO kickoff string.
-   * League games use a Firestore Timestamp.
-   *
-   * IMPORTANT: Use targeted range queries instead of reading
-   * every game in both collections on every live-score run.
-   */
-  const earliestMs =
-    now - 24 * 60 * 60 * 1000
+  const earliestDate = new Date(now - 24 * 60 * 60 * 1000)
+  const latestDate = new Date(now + 24 * 60 * 60 * 1000)
 
-  const latestMs =
-    now + 24 * 60 * 60 * 1000
+  const earliestIso = earliestDate.toISOString()
+  const latestIso = latestDate.toISOString()
 
-  const earliestDate =
-    new Date(earliestMs)
-
-  const latestDate =
-    new Date(latestMs)
-
-  const earliestIso =
-    earliestDate.toISOString()
-
-  const latestIso =
-    latestDate.toISOString()
-
-  const [
-    legacySnapshot,
-    leagueSnapshot,
-  ] = await Promise.all([
-    /*
-     * Legacy global games store kickoff as an ISO string.
-     */
-    db
-      .collection('games')
+  const [legacySnapshot, leagueSnapshot] = await Promise.all([
+    db.collection('games')
       .where('kickoff', '>=', earliestIso)
       .where('kickoff', '<=', latestIso)
       .get(),
 
-    /*
-     * Published league games store kickoffTimestamp
-     * as a Firestore Timestamp.
-     */
-    db
-      .collectionGroup('games')
-      .where(
-        'kickoffTimestamp',
-        '>=',
-        earliestDate,
-      )
-      .where(
-        'kickoffTimestamp',
-        '<=',
-        latestDate,
-      )
+    db.collectionGroup('games')
+      .where('kickoffTimestamp', '>=', earliestDate)
+      .where('kickoffTimestamp', '<=', latestDate)
       .get(),
   ])
 
-  const gameIds = new Set()
+  /*
+   * Keep the matching document snapshots, not just the game IDs.
+   * These are exactly the documents that need score updates, so
+   * there is no reason to query Firestore again once per game.
+   */
+  const gamesById = new Map()
 
-  for (const document of legacySnapshot.docs) {
+  for (const document of [
+    ...legacySnapshot.docs,
+    ...leagueSnapshot.docs,
+  ]) {
     const game = document.data()
 
-    if (
-      game.final === true ||
-      !game.gameId
-    ) {
+    if (game.final === true || !game.gameId) {
       continue
     }
 
-    gameIds.add(
-      String(game.gameId),
-    )
-  }
+    const gameId = String(game.gameId)
 
-  for (const document of leagueSnapshot.docs) {
-    const game = document.data()
-
-    if (
-      game.final === true ||
-      !game.gameId
-    ) {
-      continue
+    if (!gamesById.has(gameId)) {
+      gamesById.set(gameId, new Map())
     }
 
-    gameIds.add(
-      String(game.gameId),
-    )
+    gamesById.get(gameId).set(document.ref.path, document)
   }
 
-  return [...gameIds]
+  return new Map(
+    [...gamesById.entries()].map(([gameId, documents]) => [
+      gameId,
+      [...documents.values()],
+    ]),
+  )
 }
 
 async function syncPublishedGames() {
-  const gameIds =
-    await getRelevantPublishedGameIds()
+  const publishedGames = await getRelevantPublishedGames()
 
-  if (gameIds.length === 0) {
+  if (publishedGames.size === 0) {
     console.log(
       'No published games are within the live-update window. Nothing to sync.',
     )
+
     return
   }
 
   console.log(
-    `Live score sync for ${gameIds.length} published game(s) using ESPN per-game summaries.`,
+    `Live score sync for ${publishedGames.size} published game(s) using ESPN per-game summaries.`,
   )
 
   let updated = 0
 
-  for (const gameId of gameIds) {
+  for (const [gameId, targetDocuments] of publishedGames) {
     try {
-      const summary =
-        await fetchGameSummary(gameId)
+      const summary = await fetchGameSummary(gameId)
 
-      const competition =
-        summary?.header?.competitions?.[0]
+      const competition = summary?.header?.competitions?.[0]
 
       if (!competition) {
         console.warn(
           `WARNING: ESPN summary returned no competition for published game ${gameId}.`,
         )
+
         continue
       }
 
       const event = {
         id: gameId,
-        status:
-          competition.status ?? {},
-        competitions: [
-          competition,
-        ],
+        status: competition.status ?? {},
+        competitions: [competition],
       }
 
-      if (
-        await updatePublishedGameFromEvent(
-          event,
-          { verifySummary: false },
-        )
-      ) {
+      if (await updatePublishedGameFromEvent(event, {
+        verifySummary: false,
+        targetDocuments,
+      })) {
         updated += 1
       }
     } catch (error) {
@@ -1265,7 +1175,7 @@ async function syncPublishedGames() {
   }
 
   console.log(
-    `Updated ${updated} published game(s) with live ESPN data.`,
+    `Updated ${updated} published game(s) with changed live ESPN data.`,
   )
 }
 
@@ -1274,7 +1184,6 @@ async function syncPublishedGames() {
  * SYNC
  * ============================================================
  */
-
 async function syncEvents(
   events,
   label,
@@ -1372,6 +1281,7 @@ async function syncEvents(
   )
 
   let written = 0
+
   const currentGameIds =
     new Set()
 
@@ -1455,11 +1365,13 @@ async function syncEvents(
   }
 
   console.log('')
+
   console.log(
     `Saved ${written} rated games to Firestore.`,
   )
 
   console.log('')
+
   console.log(
     'Top rated games:',
   )
@@ -1487,6 +1399,7 @@ async function syncEvents(
     0
   ) {
     console.log('')
+
     console.warn(
       'WARNING: Games with unresolved conference data:',
     )
@@ -1578,7 +1491,6 @@ async function syncPostseason(
  * RUN
  * ============================================================
  */
-
 const mode =
   process.argv[2]
 
@@ -1658,13 +1570,16 @@ if (!mode) {
     leagueSnapshot,
   ] = await Promise.all([
     db.collection('games').doc(gameId).get(),
+
     db.collectionGroup('games')
       .where('gameId', '==', gameId)
       .get(),
   ])
 
   console.log('')
+
   console.log(`DIAGNOSTIC REPORT FOR ESPN GAME ${gameId}`)
+
   console.log('')
 
   const documents = []
@@ -1699,9 +1614,11 @@ if (!mode) {
       console.log(`displayClock: ${data.displayClock ?? ''}`)
       console.log(`awayScore: ${data.awayScore ?? ''}`)
       console.log(`homeScore: ${data.homeScore ?? ''}`)
+
       console.log(
         `scoreUpdatedAt: ${data.scoreUpdatedAt?.toDate?.()?.toISOString?.() ?? data.scoreUpdatedAt ?? ''}`,
       )
+
       console.log('')
     }
   }
@@ -1713,12 +1630,15 @@ if (!mode) {
 
   const data = await fetchScoreboard(date)
   const events = data?.events ?? []
+
   const event = events.find((item) => String(item?.id) === String(gameId))
 
   console.log('')
+
   console.log(`SCOREBOARD CHECK FOR ${gameId} ON ${date}`)
   console.log(`Total ESPN events returned: ${events.length}`)
   console.log(`Target event found: ${event ? 'YES' : 'NO'}`)
+
   console.log('')
 
   if (event) {
@@ -1758,6 +1678,7 @@ if (!mode) {
 }
 
 console.log('')
+
 console.log(
   'ESPN sync complete.',
 )
