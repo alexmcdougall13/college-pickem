@@ -8498,8 +8498,6 @@ function App() {
 
         setIsAdmin(chosenMembership.role === 'admin')
 
-        const allUsersSnapshot = await getDocs(collection(db, 'users'))
-
         const weeksSnapshot = await getDocs(
           collection(db, 'leagues', activeLeague!.id, 'weeks'),
         )
@@ -8543,13 +8541,22 @@ function App() {
           ),
         )
 
-        const memberIds = new Set(
+        const memberIds = new Set<string>(
           leagueMembersSnapshot.docs.map((memberDocument) =>
             String(memberDocument.data().userId ?? memberDocument.id),
           ),
         )
 
-        const memberDetails = new Map(
+        const memberDetails = new Map<
+          string,
+          {
+            displayName: string
+            role: 'admin' | 'player'
+            active: boolean
+            activeThroughWeekNumber: number | null
+            inactivePeriods: { startWeekNumber: number; endWeekNumber: number }[]
+          }
+        >(
           leagueMembersSnapshot.docs.map((memberDocument) => {
             const data = memberDocument.data()
 
@@ -8589,10 +8596,39 @@ function App() {
           }),
         )
 
-        const savedPlayers: LeaguePlayer[] = allUsersSnapshot.docs
-          .filter((userDocument) => memberIds.has(userDocument.id))
-          .map((userDocument) => {
-            const data = userDocument.data()
+        // Only fetch user profiles when the membership record does not
+        // already contain a display name. This avoids reading unrelated
+        // users and avoids profile reads for members whose names are stored
+        // directly on their membership documents.
+        const memberUserIds = [...memberIds]
+        const memberIdsNeedingProfiles = memberUserIds.filter(
+          (memberUserId) => !memberDetails.get(memberUserId)?.displayName,
+        )
+        const memberUserSnapshots = await Promise.all(
+          memberIdsNeedingProfiles.map((memberUserId) =>
+            getDoc(doc(db, 'users', memberUserId)),
+          ),
+        )
+        const userProfilesById = new Map<string, Record<string, unknown>>(
+          memberUserSnapshots
+            .filter((userDocument) => userDocument.exists())
+            .map((userDocument) => [
+              userDocument.id,
+              userDocument.data(),
+            ]),
+        )
+
+        const savedPlayers: LeaguePlayer[] = memberUserIds.flatMap(
+          (memberUserId) => {
+            const data = userProfilesById.get(memberUserId) ?? {}
+            const membership = memberDetails.get(memberUserId)
+
+            // Preserve the old behavior of omitting a player only when both
+            // their user profile and membership display name are missing.
+            if (!userProfilesById.has(memberUserId) && !membership?.displayName) {
+              return []
+            }
+
             const fallbackName =
               String(data.email ?? '')
                 .split('@')[0]
@@ -8608,13 +8644,8 @@ function App() {
                 ? data.name.trim()
                 : ''
 
-            const membership =
-              memberDetails.get(
-                userDocument.id,
-              )
-
-            return {
-              uid: userDocument.id,
+            return [{
+              uid: memberUserId,
               name:
                 membership?.displayName ||
                 savedFirstName ||
@@ -8632,9 +8663,9 @@ function App() {
               inactivePeriods:
                 membership?.inactivePeriods ??
                 [],
-            }
-          })
-          .sort((a, b) => a.name.localeCompare(b.name))
+            }]
+          },
+        ).sort((a, b) => a.name.localeCompare(b.name))
 
         setLeaguePlayers(savedPlayers)
 
