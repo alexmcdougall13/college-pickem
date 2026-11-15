@@ -193,41 +193,6 @@ async function enabledFidsForUser(
   )
 }
 
-async function alreadyReminded(
-  leagueId,
-  weekId,
-  userId,
-  itemId,
-) {
-  /*
-   * Test mode deliberately ignores
-   * reminder markers so we can test
-   * repeatedly without affecting
-   * production reminders.
-   */
-  if (TEST_MODE) {
-    return false
-  }
-
-  const snapshot =
-    await db
-      .collection('leagues')
-      .doc(leagueId)
-      .collection(
-        'notificationEvents',
-      )
-      .doc(
-        markerId(
-          weekId,
-          userId,
-          itemId,
-        ),
-      )
-      .get()
-
-  return snapshot.exists
-}
-
 function describeLeague(
   reminder,
 ) {
@@ -431,6 +396,37 @@ async function collectLeague(
       continue
     }
 
+    /*
+     * Read existing reminder markers once for this league/week.
+     * This avoids an individual Firestore document read for
+     * every member and every missing pick.
+     */
+    const existingReminderMarkerIds =
+      new Set()
+
+    if (!TEST_MODE) {
+      const reminderMarkersSnapshot =
+        await db
+          .collection('leagues')
+          .doc(leagueId)
+          .collection('notificationEvents')
+          .where(
+            'weekId',
+            '==',
+            weekId,
+          )
+          .get()
+
+      for (
+        const markerDoc of
+        reminderMarkersSnapshot.docs
+      ) {
+        existingReminderMarkerIds.add(
+          markerDoc.id,
+        )
+      }
+    }
+
     const membersSnapshot =
       await db
         .collection('leagues')
@@ -578,11 +574,12 @@ async function collectLeague(
         }
 
         const sent =
-          await alreadyReminded(
-            leagueId,
-            weekId,
-            userId,
-            game.gameId,
+          existingReminderMarkerIds.has(
+            markerId(
+              weekId,
+              userId,
+              game.gameId,
+            ),
           )
 
         if (!sent) {
@@ -602,11 +599,12 @@ async function collectLeague(
           )
         ) {
           const sent =
-            await alreadyReminded(
-              leagueId,
-              weekId,
-              userId,
-              'tiebreaker',
+            existingReminderMarkerIds.has(
+              markerId(
+                weekId,
+                userId,
+                'tiebreaker',
+              ),
             )
 
           missingTiebreaker =
